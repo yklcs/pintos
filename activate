@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 
-SCRIPT=$(readlink -f $0)
-SCRIPTDIR=$(dirname $SCRIPT)
+SCRIPT_PATH=$(realpath ${BASH_SOURCE[0]})
+SCRIPT_DIR=$(dirname $SCRIPT_PATH)
 
-PINTOSUTILS=$SCRIPTDIR/src/utils
+export PINTOSPATH=$SCRIPT_DIR
 
-export PINTOSPATH=$SCRIPTDIR
+PINTOSUTILS=$PINTOSPATH/src/utils
 export PATH=$PATH:$PINTOSUTILS
