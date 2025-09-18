@@ -58,8 +58,8 @@ shutdown_reboot (void)
 {
   printf ("Rebooting...\n");
 
-    /* See [kbd] for details on how to program the keyboard
-     * controller. */
+  /* See [kbd] for details on how to program the keyboard
+   * controller. */
   for (;;)
     {
       int i;
@@ -121,7 +121,8 @@ shutdown_power_off (void)
 
   /* None of those worked. */
   printf ("still running...\n");
-  for (;;);
+  for (;;)
+    ;
 }
 
 /* Print statistics about Pintos execution. */
