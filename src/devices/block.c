@@ -205,9 +205,9 @@ block_register (const char *name, enum block_type type, const char *extra_info,
 
   return block;
 }
-
+
 /* Returns the block device corresponding to LIST_ELEM, or a null
-     pointer if LIST_ELEM is the list end of all_blocks. */
+      pointer if LIST_ELEM is the list end of all_blocks. */
 static struct block *
 list_elem_to_block (struct list_elem *list_elem)
 {

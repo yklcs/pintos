@@ -1,3 +1,4 @@
 BasedOnStyle: GNU
 IndentWidth: 2
 SortIncludes: false
+KeepFormFeed: false

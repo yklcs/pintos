@@ -59,7 +59,7 @@ static inline uint64_t make_idtr_operand (uint16_t limit, void *base);
 /* Interrupt handlers. */
 void intr_handler (struct intr_frame *args);
 static void unexpected_interrupt (const struct intr_frame *);
-
+
 /* Returns the current interrupt status. */
 enum intr_level
 intr_get_level (void)
@@ -112,7 +112,7 @@ intr_disable (void)
 
   return old_level;
 }
-
+
 /* Initializes the interrupt system. */
 void
 intr_init (void)
@@ -224,7 +224,7 @@ intr_yield_on_return (void)
   ASSERT (intr_context ());
   yield_on_return = true;
 }
-
+
 /* 8259A Programmable Interrupt Controller. */
 
 /* Initializes the PICs.  Refer to [8259A] for details.
@@ -273,23 +273,23 @@ pic_end_of_interrupt (int irq)
   if (irq >= 0x28)
     outb (0xa0, 0x20);
 }
-
+
 /* Creates an gate that invokes FUNCTION.
-
-     The gate has descriptor privilege level DPL, meaning that it
-     can be invoked intentionally when the processor is in the DPL
-     or lower-numbered ring.  In practice, DPL==3 allows user mode
-     to call into the gate and DPL==0 prevents such calls.  Faults
-     and exceptions that occur in user mode still cause gates with
-     DPL==0 to be invoked.  See [IA32-v3a] sections 4.5 "Privilege
-     Levels" and 4.8.1.1 "Accessing Nonconforming Code Segments"
-     for further discussion.
-
-     TYPE must be either 14 (for an interrupt gate) or 15 (for a
-     trap gate).  The difference is that entering an interrupt gate
-     disables interrupts, but entering a trap gate does not.  See
-     [IA32-v3a] section 5.12.1.2 "Flag Usage By Exception- or
-     Interrupt-Handler Procedure" for discussion. */
+
+      The gate has descriptor privilege level DPL, meaning that it
+      can be invoked intentionally when the processor is in the DPL
+      or lower-numbered ring.  In practice, DPL==3 allows user mode
+      to call into the gate and DPL==0 prevents such calls.  Faults
+      and exceptions that occur in user mode still cause gates with
+      DPL==0 to be invoked.  See [IA32-v3a] sections 4.5 "Privilege
+      Levels" and 4.8.1.1 "Accessing Nonconforming Code Segments"
+      for further discussion.
+
+      TYPE must be either 14 (for an interrupt gate) or 15 (for a
+      trap gate).  The difference is that entering an interrupt gate
+      disables interrupts, but entering a trap gate does not.  See
+      [IA32-v3a] section 5.12.1.2 "Flag Usage By Exception- or
+      Interrupt-Handler Procedure" for discussion. */
 static uint64_t
 make_gate (void (*function) (void), int dpl, int type)
 {
@@ -334,7 +334,7 @@ make_idtr_operand (uint16_t limit, void *base)
 {
   return limit | ((uint64_t)(uint32_t)base << 16);
 }
-
+
 /* Interrupt handlers. */
 
 /* Handler for all interrupts, faults, and exceptions.  This

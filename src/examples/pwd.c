@@ -24,10 +24,10 @@ main (void)
       return EXIT_FAILURE;
     }
 }
-
+
 /* Stores the inode number for FILE_NAME in *INUM.
-     Returns true if successful, false if the file could not be
-     opened. */
+      Returns true if successful, false if the file could not be
+      opened. */
 static bool
 get_inumber (const char *file_name, int *inum)
 {
