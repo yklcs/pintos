@@ -3,7 +3,23 @@
 SCRIPT_PATH=$(realpath ${BASH_SOURCE[0]:-$0})
 SCRIPT_DIR=$(dirname $SCRIPT_PATH)
 
+if [[ ! -f $SCRIPT_DIR/src/Makefile.kernel ]]; then
+  echo "$SCRIPT_DIR does not contain a valid Pintos project"
+  return 1
+fi
+
 export PINTOSPATH=$SCRIPT_DIR
+echo "Activating in $PINTOSPATH"
 
 PINTOSUTILS=$PINTOSPATH/src/utils
 export PATH=$PATH:$PINTOSUTILS
+
+function format-check {
+  echo "Checking formatting for files in $PINTOSPATH"
+  clang-format --dry-run $PINTOSPATH/src/**/*.c $PINTOSPATH/src/**/*.h
+}
+
+function format {
+    echo "Formatting files in $PINTOSPATH"
+  clang-format -i $PINTOSPATH/src/**/*.c $PINTOSPATH/src/**/*.h
+}
