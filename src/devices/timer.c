@@ -3,6 +3,7 @@
 #include <inttypes.h>
 #include <round.h>
 #include <stdio.h>
+#include <list.h>
 #include "devices/pit.h"
 #include "threads/interrupt.h"
 #include "threads/synch.h"
@@ -20,6 +21,11 @@
 /* Number of timer ticks since OS booted. */
 static int64_t ticks;
 
+/* List of currently sleeping threads.
+   Ordered in descending order of wakeup_tick,
+   such that the head wakes up first. */
+struct list sleeping_list;
+
 /* Number of loops per timer tick.
    Initialized by timer_calibrate(). */
 static unsigned loops_per_tick;
@@ -30,6 +36,10 @@ static void busy_wait (int64_t loops);
 static void real_time_sleep (int64_t num, int32_t denom);
 static void real_time_delay (int64_t num, int32_t denom);
 
+void timer_wake_any (void);
+bool thread_cmp_wakeup_tick (const struct list_elem *a,
+                             const struct list_elem *b, void *aux);
+
 /* Sets up the timer to interrupt TIMER_FREQ times per second,
    and registers the corresponding interrupt. */
 void
@@ -37,6 +47,7 @@ timer_init (void)
 {
   pit_configure_channel (0, 2, TIMER_FREQ);
   intr_register_ext (0x20, timer_interrupt, "8254 Timer");
+  list_init (&sleeping_list);
 }
 
 /* Calibrates loops_per_tick, used to implement brief delays. */
@@ -92,8 +103,41 @@ timer_sleep (int64_t ticks)
   int64_t start = timer_ticks ();
 
   ASSERT (intr_get_level () == INTR_ON);
-  while (timer_elapsed (start) < ticks)
-    thread_yield ();
+
+  enum intr_level old_level = intr_disable ();
+  struct thread *t = thread_current ();
+
+  t->wakeup_tick = start + ticks;
+  list_insert_ordered (&sleeping_list, &t->elem, thread_cmp_wakeup_tick, NULL);
+  thread_block ();
+
+  intr_set_level (old_level);
+}
+
+/* Wake any threads that are sleeping. */
+void
+timer_wake_any (void)
+{
+  struct list_elem *pos, *next;
+  struct thread *t;
+
+  list_foreach (&sleeping_list, pos, next)
+  {
+    t = list_entry (pos, struct thread, elem);
+    if (t->wakeup_tick > ticks)
+      break;
+    list_remove (pos);
+    thread_unblock (t);
+  }
+}
+
+/* Compares the wakeup ticks of two threads in ascending order. */
+bool
+thread_cmp_wakeup_tick (const struct list_elem *a, const struct list_elem *b,
+                        void *aux UNUSED)
+{
+  return list_entry (a, struct thread, elem)->wakeup_tick
+         < list_entry (b, struct thread, elem)->wakeup_tick;
 }
 
 /* Sleeps for approximately MS milliseconds.  Interrupts must be
@@ -172,6 +216,7 @@ timer_interrupt (struct intr_frame *args UNUSED)
 {
   ticks++;
   thread_tick ();
+  timer_wake_any ();
 }
 
 /* Returns true if LOOPS iterations waits for more than one timer
