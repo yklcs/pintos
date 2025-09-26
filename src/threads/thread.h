@@ -95,6 +95,10 @@ struct thread
 
   int64_t wakeup_tick; /* Tick to wake up at. */
 
+  int base_priority;            /* Base priority before donations. */
+  struct lock *waiting_on_lock; /* Lock blocking the thread. */
+  struct list locks_held;       /* All locks held by thread. */
+
 #ifdef USERPROG
   /* Owned by userprog/process.c. */
   uint32_t *pagedir; /* Page directory. */
@@ -138,6 +142,10 @@ void thread_foreach (thread_action_func *, void *);
 
 int thread_get_priority (void);
 void thread_set_priority (int);
+
+#define DONATION_DEPTH 8
+void thread_donate_priority (struct thread *t);
+void thread_refresh_priority (struct thread *t);
 
 int thread_get_nice (void);
 void thread_set_nice (int);

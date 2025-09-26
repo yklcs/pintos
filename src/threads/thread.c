@@ -340,7 +340,11 @@ thread_foreach (thread_action_func *func, void *aux)
 void
 thread_set_priority (int new_priority)
 {
-  thread_current ()->priority = new_priority;
+  struct thread *t = thread_current ();
+  t->priority = new_priority;
+  t->base_priority = new_priority;
+
+  thread_refresh_priority (t);
 
   if (thread_needs_yielding ())
     thread_yield ();
@@ -351,6 +355,62 @@ int
 thread_get_priority (void)
 {
   return thread_current ()->priority;
+}
+
+/* Chained donation of priorities, with the chain starting at T.
+ *   T (waiting on lock held by) T1 (waiting on lock held by T2)
+ *   T (donates to) T1 (donates to) T2
+ */
+void
+thread_donate_priority (struct thread *t)
+{
+  struct thread *cur = t;
+  struct lock *lock;
+  struct thread *holder;
+  int i;
+
+  for (i = 0; i < DONATION_DEPTH; i++)
+    {
+      lock = cur->waiting_on_lock;
+      if (lock == NULL)
+        break;
+
+      holder = lock->holder;
+
+      if (cur->priority > holder->priority)
+        holder->priority = cur->priority;
+
+      cur = holder;
+    }
+}
+
+/* Refreshes the priority of the specified thread.
+ * The priority of a thread must be at least the maximum of its waiters.
+ *   priority(t) = max(t->base_priority, ...priorities of waiters of t)
+ */
+void
+thread_refresh_priority (struct thread *t)
+{
+  int max_priority = t->base_priority;
+  struct list_elem *pos, *next;
+  struct lock *lock;
+  struct list *waiters;
+  struct thread *waiter;
+
+  list_foreach (&t->locks_held, pos, next)
+  {
+    lock = list_entry (pos, struct lock, elem);
+    waiters = &lock->semaphore.waiters;
+    if (list_empty (waiters))
+      continue;
+
+    waiter = list_entry (list_min (waiters, thread_cmp_priority, NULL),
+                         struct thread, elem);
+    if (waiter->priority > max_priority)
+      max_priority = waiter->priority;
+  }
+
+  t->priority = max_priority;
 }
 
 /* Sets the current thread's nice value to NICE. */
@@ -471,6 +531,10 @@ init_thread (struct thread *t, const char *name, int priority)
   t->stack = (uint8_t *)t + PGSIZE;
   t->priority = priority;
   t->wakeup_tick = 0;
+  t->base_priority = priority;
+  t->waiting_on_lock = NULL;
+  list_init (&t->locks_held);
+
   t->magic = THREAD_MAGIC;
 
   old_level = intr_disable ();
