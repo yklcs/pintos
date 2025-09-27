@@ -152,10 +152,15 @@ thread_tick (void)
   else
     kernel_ticks++;
 
-  update_load_avg ();
-  update_recent_cpu ();
-  if (thread_mlfqs)
+  if (timer_ticks () % TIMER_FREQ == 0)
+    {
+      update_load_avg ();
+      update_recent_cpu ();
+    }
+  if (thread_mlfqs && timer_ticks () % TIME_SLICE == 0)
     update_mlfqs_priority ();
+  if (t != idle_thread)
+    t->recent_cpu = fixadd (t->recent_cpu, inttofix (1));
 
   /* Enforce preemption. */
   if (++thread_ticks >= TIME_SLICE)
@@ -372,6 +377,10 @@ void
 thread_set_priority (int new_priority)
 {
   struct thread *t = thread_current ();
+
+  if (thread_mlfqs)
+    return;
+
   t->priority = new_priority;
   t->base_priority = new_priority;
 
@@ -455,10 +464,17 @@ void
 thread_set_nice (int nice)
 {
   struct thread *t = thread_current ();
-  t->nice = nice;
+  enum intr_level old_level;
+  bool needs_yielding;
 
-  /* Will preempt if needed */
-  thread_set_priority (compute_mlfqs_priority (t));
+  old_level = intr_disable ();
+  t->nice = nice;
+  t->priority = compute_mlfqs_priority (t);
+  needs_yielding = thread_needs_yielding ();
+  intr_set_level (old_level);
+
+  if (needs_yielding)
+    thread_yield ();
 }
 
 /* Returns the current thread's nice value. */
@@ -710,14 +726,18 @@ thread_cmp_priority (const struct list_elem *a, const struct list_elem *b,
 bool
 thread_needs_yielding (void)
 {
-  if (!list_empty (&ready_list))
-    {
-      return thread_current ()->priority
-             < list_entry (list_front (&ready_list), struct thread, elem)
-                   ->priority;
-    }
+  bool should_yield = false;
+  enum intr_level old_level;
+  struct thread *next;
 
-  return false;
+  old_level = intr_disable ();
+  if (list_empty (&ready_list))
+    return false;
+  next = list_entry (list_front (&ready_list), struct thread, elem);
+  should_yield = thread_current ()->priority < next->priority;
+  intr_set_level (old_level);
+
+  return should_yield;
 }
 
 /* Number of ready (or running) non-idle threads. */
@@ -740,7 +760,7 @@ num_ready_threads (void)
   return n;
 }
 
-/* Update global load_avg, to be called every tick. */
+/* Update global load_avg, to be called every second. */
 void
 update_load_avg (void)
 {
@@ -748,16 +768,13 @@ update_load_avg (void)
 
   ASSERT (intr_context ());
 
-  if (timer_ticks () % TIMER_FREQ == 0)
-    {
-      w_1 = fixdiv (inttofix (59), inttofix (60));
-      w_2 = fixdiv (inttofix (1), inttofix (60));
-      load_avg = fixadd (fixmul (w_1, load_avg),
-                         fixmul (w_2, inttofix (num_ready_threads ())));
-    }
+  w_1 = fixdiv (inttofix (59), inttofix (60));
+  w_2 = fixdiv (inttofix (1), inttofix (60));
+  load_avg = fixadd (fixmul (w_1, load_avg),
+                     fixmul (w_2, inttofix (num_ready_threads ())));
 }
 
-/* Update recent_cpu for every thread, to be called every tick. */
+/* Update recent_cpu for every thread, to be called every second. */
 void
 update_recent_cpu (void)
 {
@@ -767,24 +784,17 @@ update_recent_cpu (void)
 
   ASSERT (intr_context ());
 
-  t = thread_current ();
-  if (t != idle_thread)
-    t->recent_cpu = fixadd (t->recent_cpu, inttofix (1));
-
-  if (timer_ticks () % TIMER_FREQ == 0)
-    {
-      w_1 = fixmul (inttofix (2), load_avg);
-      w_2 = fixadd (w_1, inttofix (1));
-      w = fixdiv (w_1, w_2);
-      list_foreach (&all_list, pos, next)
-      {
-        t = list_entry (pos, struct thread, allelem);
-        t->recent_cpu = fixadd (fixmul (w, t->recent_cpu), inttofix (t->nice));
-      }
-    }
+  w_1 = fixmul (inttofix (2), load_avg);
+  w_2 = fixadd (w_1, inttofix (1));
+  w = fixdiv (w_1, w_2);
+  list_foreach (&all_list, pos, next)
+  {
+    t = list_entry (pos, struct thread, allelem);
+    t->recent_cpu = fixadd (fixmul (w, t->recent_cpu), inttofix (t->nice));
+  }
 }
 
-/* Update MLFQS priorities for every thread, to be called every tick. */
+/* Update MLFQS priorities for every thread, to be called every 4 ticks. */
 void
 update_mlfqs_priority (void)
 {
@@ -793,12 +803,14 @@ update_mlfqs_priority (void)
 
   ASSERT (intr_context ());
 
-  if (timer_ticks () % TIME_SLICE == 0)
-    list_foreach (&all_list, pos, next)
-    {
-      t = list_entry (pos, struct thread, allelem);
-      t->priority = compute_mlfqs_priority (t);
-    }
+  list_foreach (&all_list, pos, next)
+  {
+    t = list_entry (pos, struct thread, allelem);
+    t->priority = compute_mlfqs_priority (t);
+  }
+
+  if (!list_empty (&ready_list))
+    list_sort (&ready_list, thread_cmp_priority, NULL);
 }
 
 /* Compute the MLFQS priority of a thread base on niceness and statistics. */
