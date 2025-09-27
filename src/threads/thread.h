@@ -4,6 +4,7 @@
 #include <debug.h>
 #include <list.h>
 #include <stdint.h>
+#include <fix.h>
 
 /* States in a thread's life cycle. */
 enum thread_status
@@ -98,6 +99,9 @@ struct thread
   int base_priority;            /* Base priority before donations. */
   struct lock *waiting_on_lock; /* Lock blocking the thread. */
   struct list locks_held;       /* All locks held by thread. */
+
+  int nice;         /* Niceness. */
+  fix_t recent_cpu; /* Recent CPU time. */
 
 #ifdef USERPROG
   /* Owned by userprog/process.c. */
