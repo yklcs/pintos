@@ -2,6 +2,7 @@
 #include <debug.h>
 #include <inttypes.h>
 #include <round.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -21,36 +22,115 @@
 static thread_func start_process NO_RETURN;
 static bool load (const char *cmdline, void (**eip) (void), void **esp);
 
+#define MAX_ARGC 128
+
+struct args
+{
+  char *argv[MAX_ARGC]; /* Parsed arguments (128 limit) */
+  int argc;             /* Length of argv */
+  char *_page;          /* Page for strings contained in argv */
+};
+
+/* Parses cmd into argv, and returns the number of parsed arugments. */
+int
+parse_args (char *cmd, char **argv)
+{
+  int argc = 0;
+  char *tok, *p;
+
+  for (tok = strtok_r (cmd, " ", &p); tok != NULL;
+       tok = strtok_r (NULL, " ", &p))
+    argv[argc++] = tok;
+
+  return argc;
+}
+
+/* Pushes  */
+void
+push_args (struct args *args, struct intr_frame *if_)
+{
+  int i;
+  int len;
+  char **argv_ptr;
+
+  // void **esp = &if_->esp;
+  char *arg_ptrs[MAX_ARGC];
+
+  /* Argument data */
+  for (i = args->argc - 1; i >= 0; i--)
+    {
+      len = strlen (args->argv[i]) + 1;
+      if_->esp -= len;
+      strlcpy (if_->esp, args->argv[i], len);
+      arg_ptrs[i] = if_->esp;
+    }
+
+  /* Align down */
+  if_->esp = (void *)((uintptr_t)if_->esp & ~(uintptr_t)3);
+
+  /* Null termination for argv */
+  if_->esp -= sizeof (char *);
+  *(char **)if_->esp = NULL;
+
+  /* argv  */
+  for (i = args->argc - 1; i >= 0; i--)
+    {
+      if_->esp -= sizeof (char *);
+      *(char **)if_->esp = arg_ptrs[i];
+    }
+
+  /* argv pointer  */
+  argv_ptr = if_->esp;
+  if_->esp -= sizeof (char **);
+  *(char ***)if_->esp = argv_ptr;
+
+  /* argc */
+  if_->esp -= sizeof (int);
+  *(int *)if_->esp = args->argc;
+
+  /* Return address */
+  if_->esp -= sizeof (void *);
+  *(void **)if_->esp = NULL;
+}
+
 /* Starts a new thread running a user program loaded from
    FILENAME.  The new thread may be scheduled (and may even exit)
    before process_execute() returns.  Returns the new process's
    thread id, or TID_ERROR if the thread cannot be created. */
 tid_t
-process_execute (const char *file_name)
+process_execute (const char *cmd)
 {
-  char *fn_copy;
   tid_t tid;
 
-  /* Make a copy of FILE_NAME.
-     Otherwise there's a race between the caller and load(). */
-  fn_copy = palloc_get_page (0);
-  if (fn_copy == NULL)
+  struct args *args = palloc_get_page (PAL_ZERO);
+  if (args == NULL)
     return TID_ERROR;
-  strlcpy (fn_copy, file_name, PGSIZE);
+
+  /* Make a copy of cmd to use for args.
+     Otherwise there's a race between the caller and load(). */
+  args->_page = palloc_get_page (0);
+  if (args->_page == NULL)
+    return TID_ERROR;
+  strlcpy (args->_page, cmd, PGSIZE);
+
+  args->argc = parse_args (args->_page, args->argv);
 
   /* Create a new thread to execute FILE_NAME. */
-  tid = thread_create (file_name, PRI_DEFAULT, start_process, fn_copy);
+  tid = thread_create (args->argv[0], PRI_DEFAULT, start_process, args);
   if (tid == TID_ERROR)
-    palloc_free_page (fn_copy);
+    {
+      palloc_free_page (args->_page);
+      palloc_free_page (args);
+    }
   return tid;
 }
 
 /* A thread function that loads a user process and starts it
    running. */
 static void
-start_process (void *file_name_)
+start_process (void *args_)
 {
-  char *file_name = file_name_;
+  struct args *args = args_;
   struct intr_frame if_;
   bool success;
 
@@ -59,10 +139,14 @@ start_process (void *file_name_)
   if_.gs = if_.fs = if_.es = if_.ds = if_.ss = SEL_UDSEG;
   if_.cs = SEL_UCSEG;
   if_.eflags = FLAG_IF | FLAG_MBS;
-  success = load (file_name, &if_.eip, &if_.esp);
+  success = load (args->argv[0], &if_.eip, &if_.esp);
+
+  /* Push arguments onto stack */
+  push_args (args, &if_);
+  palloc_free_page (args->_page);
+  palloc_free_page (args);
 
   /* If load failed, quit. */
-  palloc_free_page (file_name);
   if (!success)
     thread_exit ();
 
@@ -88,6 +172,8 @@ start_process (void *file_name_)
 int
 process_wait (tid_t child_tid UNUSED)
 {
+  while (1)
+    ;
   return -1;
 }
 
