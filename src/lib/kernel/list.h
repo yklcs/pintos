@@ -177,4 +177,10 @@ void list_unique (struct list *, struct list *duplicates, list_less_func *,
 struct list_elem *list_max (struct list *, list_less_func *, void *aux);
 struct list_elem *list_min (struct list *, list_less_func *, void *aux);
 
+/* Iterate through LIST using POS, storing the next element in NEXT.
+   This is safe to use while removing POS from LIST. */
+#define list_foreach(LIST, POS, NEXT)                                         \
+  for (POS = list_begin (LIST), NEXT = POS->next; POS != list_end (LIST);     \
+       POS = NEXT, NEXT = POS->next)
+
 #endif /* lib/kernel/list.h */
