@@ -15,7 +15,7 @@ void process_activate (void);
 /*
  * Describes a process.
  * The lifetime is independent from the execution thread.
- * Allocated in process_execute, freed in process_wait.
+ * Allocated in process_execute, freed in process_exit.
  */
 struct process
 {
@@ -23,21 +23,25 @@ struct process
 
   char *argv[MAX_ARGC]; /* Parsed arguments (with count limit) */
   int argc;             /* Length of argv */
-  char *argstrs;        /* Page for strings contained in argv */
+  char *argbuf;         /* Buffer for argv, separately allocated */
 
-  int exit_code;
-  struct semaphore exited;
+  int exit_code;           /* Exit code */
+  struct semaphore exited; /* Signaled to parent when exited */
+  struct semaphore reaped; /* Signaled from parent when reaped */
 
-  struct semaphore loaded;
-  bool load_success;
-  struct file *executable;
+  struct semaphore loaded; /* Signaled to parent when loaded */
+  bool load_success;       /* Load success */
+  struct file *executable; /* File process was loaded from */
 
-  struct list fds;
-  int num_fds;
+  struct list fds; /* File descriptor list */
+  int num_fds;     /* Number of all file descriptors (monotonic) */
 
-  struct list_elem elem;
+  struct list_elem elem; /* Link for children of struct thread */
 };
 
+/* Associates files and file descriptors.
+ * Allocated in sys_open, freed in sys_close or process_exit.
+ */
 struct fd
 {
   struct file *file;

@@ -48,23 +48,23 @@ process_execute (const char *cmd)
 
   /* Make a copy of cmd to use for the child.
      Otherwise there's a race between the caller and load(). */
-  child->argstrs = palloc_get_page (0);
-  if (child->argstrs == NULL)
+  child->argbuf = palloc_get_page (0);
+  if (child->argbuf == NULL)
     {
       palloc_free_page (child);
       return TID_ERROR;
     }
-  strlcpy (child->argstrs, cmd, PGSIZE);
+  strlcpy (child->argbuf, cmd, PGSIZE);
 
   /* Parse cmdline args */
-  child->argc = parse_args (child->argstrs, child->argv);
+  child->argc = parse_args (child->argbuf, child->argv);
 
   /* Create a new thread to execute argv[0]. */
   child->pid
       = thread_create (child->argv[0], PRI_DEFAULT, start_process, child);
   if (child->pid == TID_ERROR)
     {
-      palloc_free_page (child->argstrs);
+      palloc_free_page (child->argbuf);
       palloc_free_page (child);
       return PID_ERROR;
     }
@@ -123,39 +123,41 @@ start_process (void *proc_)
    exception), returns -1.  If TID is invalid or if it was not a
    child of the calling process, or if process_wait() has already
    been successfully called for the given TID, returns -1
-   immediately, without waiting.
-
-   This function will be implemented in problem 2-2.  For now, it
-   does nothing. */
+   immediately, without waiting. */
 int
-process_wait (tid_t child_tid UNUSED)
+process_wait (tid_t child_tid)
 {
   struct thread *t = thread_current ();
   struct list_elem *pos, *next;
-  struct process *child;
+  struct process *p, *child = NULL;
   int child_exit_code;
 
+  /* Look for process with given pid */
   list_foreach (&t->children, pos, next)
   {
-    child = list_entry (pos, struct process, elem);
-    if (child->pid == child_tid)
+    p = list_entry (pos, struct process, elem);
+    if (p->pid == child_tid)
       {
-        /* Remove from children, so that further waits are impossible */
-        list_remove (pos);
-
-        /* Wait until child exits */
-        sema_down (&child->exited);
-        child_exit_code = child->exit_code;
-
-        /* Destroy current process structure */
-        palloc_free_page (child->argstrs);
-        palloc_free_page (child);
-
-        return child_exit_code;
+        /* Found child, remove so that further waits are impossible */
+        child = p;
+        list_remove (&child->elem);
+        break;
       }
   }
 
-  return -1;
+  /* Child not found */
+  if (child == NULL)
+    return -1;
+
+  /* Wait until child has exited and produced its exit code,
+     reap by collecting the exit code,
+     then signal zombie child to free its resources.
+     Two semaphores are used to prevent use-after-free. */
+  sema_down (&child->exited); /* Wait until child exits */
+  child_exit_code = child->exit_code;
+  sema_up (&child->reaped); /* Zombie child is reaped and ready to be freed */
+
+  return child_exit_code;
 }
 
 /* Free the current process's resources. */
@@ -165,6 +167,7 @@ process_exit (void)
   struct thread *t = thread_current ();
   struct process *proc = t->process;
   struct fd *fd;
+  struct process *child;
   uint32_t *pd;
 
   struct list_elem *pos, *next;
@@ -172,10 +175,10 @@ process_exit (void)
   /* Print termination message */
   printf ("%s: exit(%d)\n", proc->argv[0], proc->exit_code);
 
-  /* Signal waiting parent */
-  sema_up (&proc->exited);
+  /* Close executable */
+  file_close (proc->executable);
 
-  /* Destroy open files */
+  /* Close open files and freeing their resources */
   list_foreach (&proc->fds, pos, next)
   {
     fd = list_entry (pos, struct fd, elem);
@@ -184,7 +187,20 @@ process_exit (void)
     palloc_free_page (fd);
   }
 
-  file_close (proc->executable);
+  /* Disown children */
+  list_foreach (&t->children, pos, next)
+  {
+    child = list_entry (pos, struct process, elem);
+    sema_up (&child->reaped); /* Children are "reaped", no zombies needed */
+  }
+
+  /* Signal to waiting parent that exit code is ready,
+     then wait for parent to reap the exit code,
+     before freeing all process data. */
+  sema_up (&proc->exited);   /* Signal waiting parent */
+  sema_down (&proc->reaped); /* Wait until parent reaps */
+  palloc_free_page (proc->argbuf);
+  palloc_free_page (proc);
 
   /* Destroy the current process's page directory and switch back
      to the kernel-only page directory. */
@@ -223,15 +239,16 @@ process_activate (void)
 void
 init_process (struct process *proc)
 {
-  struct thread *t = thread_current ();
+  struct thread *parent = thread_current ();
 
   proc->pid = PID_ERROR;
 
   proc->argc = 0;
-  proc->argstrs = NULL;
+  proc->argbuf = NULL;
 
   proc->exit_code = EXIT_CRITICAL;
   sema_init (&proc->exited, 0);
+  sema_init (&proc->reaped, 0);
 
   sema_init (&proc->loaded, 0);
   proc->load_success = false;
@@ -240,7 +257,7 @@ init_process (struct process *proc)
   list_init (&proc->fds);
   proc->num_fds = 2; /* stdio are already taken */
 
-  list_push_back (&t->children, &proc->elem);
+  list_push_back (&parent->children, &proc->elem);
 }
 
 /* Parses cmd into argv, and returns the number of parsed arguments. */
