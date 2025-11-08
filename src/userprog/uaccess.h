@@ -6,20 +6,21 @@
 #include <stdbool.h>
 
 void validate_uaddr (const void *uaddr);
+void validate_uaddrs (const void *uaddr, size_t n);
 
 /* Gets value at user address uaddr and reads it into x.
    Validation is performed. */
 #define get_user(x, uaddr)                                                    \
   ({                                                                          \
-    validate_uaddr ((uaddr));                                                 \
-    (x) = *(typeof (&(x)))(uaddr);                                            \
+    validate_uaddrs ((uaddr), sizeof ((x)));                                  \
+    (x) = *(typeof (x) *)(uaddr);                                             \
   })
 
 /* Stores value at user address uaddr.
    Validation is performed. */
 #define put_user(uaddr, value)                                                \
   ({                                                                          \
-    validate_uaddr ((uaddr));                                                 \
+    validate_uaddrs ((uaddr), sizeof ((value)));                              \
     *(typeof ((0 + value)) *)(uaddr) = (value);                               \
   })
 

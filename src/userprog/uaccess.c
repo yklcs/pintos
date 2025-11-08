@@ -8,7 +8,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-/* Validates uaddr as a user address.
+/* Validates single uaddr as a user address.
    Exits the thread if invalid.  */
 void
 validate_uaddr (const void *uaddr)
@@ -28,6 +28,15 @@ validate_uaddr (const void *uaddr)
       t->process->exit_code = EXIT_CRITICAL;
       thread_exit ();
     }
+}
+
+/* Validates range of uaddrs as user addresses.
+   Exits the thread if invalid.  */
+void
+validate_uaddrs (const void *uaddr, size_t n)
+{
+  for (size_t i = 0; i < n; i++)
+    validate_uaddr (uaddr + i);
 }
 
 /* Copies size bytes from user address usrc to user addess udst.
@@ -67,7 +76,8 @@ strnlen_user (const char *uaddr, size_t maxlen)
 
   while (len < maxlen)
     {
-      get_user (c, uaddr + len++);
+      get_user (c, uaddr + len);
+      len++;
       if (c == '\0')
         break;
     }
