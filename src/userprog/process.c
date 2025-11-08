@@ -493,8 +493,6 @@ load (const char *file_name, void (**eip) (void), void **esp)
         }
     }
 
-  fs_lock_release ();
-
   /* Set up stack. */
   if (!setup_stack (esp))
     goto done;
@@ -506,6 +504,7 @@ load (const char *file_name, void (**eip) (void), void **esp)
 
 done:
   /* We arrive here whether the load is successful or not. */
+  fs_lock_release ();
   return success;
 }
 
