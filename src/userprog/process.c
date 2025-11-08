@@ -147,7 +147,6 @@ process_wait (tid_t child_tid UNUSED)
         /* Destroy current process structure */
         palloc_free_page (child->argstrs);
         palloc_free_page (child);
-        t->process = NULL;
 
         return child_exit_code;
       }
