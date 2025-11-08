@@ -410,7 +410,10 @@ load (const char *file_name, void (**eip) (void), void **esp)
     goto done;
   process_activate ();
 
-  /* Open executable file. */
+  fs_lock_acquire ();
+
+  /* Open executable file.
+     Will be closed in process_exit. */
   file = filesys_open (file_name);
   if (file == NULL)
     {
@@ -489,6 +492,8 @@ load (const char *file_name, void (**eip) (void), void **esp)
           break;
         }
     }
+
+  fs_lock_release ();
 
   /* Set up stack. */
   if (!setup_stack (esp))

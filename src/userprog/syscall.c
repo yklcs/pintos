@@ -17,9 +17,6 @@
 #include "threads/thread.h"
 #include "userprog/uaccess.h"
 
-/* Global filesystem lock */
-struct lock fs_lock;
-
 static void syscall_handler (struct intr_frame *);
 
 struct fd *find_fd (int fdnum);
@@ -43,7 +40,6 @@ sys_fn sys_close;
 void
 syscall_init (void)
 {
-  lock_init (&fs_lock);
   intr_register_int (0x30, 3, INTR_ON, syscall_handler, "syscall");
 }
 
@@ -122,9 +118,9 @@ sys_create (struct intr_frame *if_)
   get_user (size, if_->esp + sizeof (int) + sizeof (char *));
   strnlen_user (filename, PGSIZE); /* Performs validation */
 
-  lock_acquire (&fs_lock);
+  fs_lock_acquire ();
   ok = filesys_create (filename, size);
-  lock_release (&fs_lock);
+  fs_lock_release ();
 
   if_->eax = ok;
 }
@@ -138,9 +134,9 @@ sys_remove (struct intr_frame *if_)
   get_user (filename, if_->esp + sizeof (int));
   strnlen_user (filename, PGSIZE); /* Performs validation */
 
-  lock_acquire (&fs_lock);
+  fs_lock_acquire ();
   ok = filesys_remove (filename);
-  lock_release (&fs_lock);
+  fs_lock_release ();
 
   if_->eax = ok;
 }
@@ -163,9 +159,9 @@ sys_open (struct intr_frame *if_)
       return;
     }
 
-  lock_acquire (&fs_lock);
+  fs_lock_acquire ();
   fd->file = filesys_open (filename);
-  lock_release (&fs_lock);
+  fs_lock_release ();
 
   /* Failed to open */
   if (fd->file == NULL)
@@ -197,9 +193,9 @@ sys_filesize (struct intr_frame *if_)
       return;
     }
 
-  lock_acquire (&fs_lock);
+  fs_lock_acquire ();
   filesize = file_length (fd->file);
-  lock_release (&fs_lock);
+  fs_lock_release ();
 
   if_->eax = filesize;
 }
@@ -234,9 +230,9 @@ sys_read (struct intr_frame *if_)
       return;
     }
 
-  lock_acquire (&fs_lock);
+  fs_lock_acquire ();
   bytes_read = file_read (fd->file, buf, size);
-  lock_release (&fs_lock);
+  fs_lock_release ();
 
   if_->eax = bytes_read;
 }
@@ -270,9 +266,9 @@ sys_write (struct intr_frame *if_)
       return;
     }
 
-  lock_acquire (&fs_lock);
+  fs_lock_acquire ();
   bytes_written = file_write (fd->file, buf, size);
-  lock_release (&fs_lock);
+  fs_lock_release ();
 
   if_->eax = bytes_written;
 }
@@ -291,9 +287,9 @@ sys_seek (struct intr_frame *if_)
   if ((fd = find_fd (fdnum)) == NULL)
     return;
 
-  lock_acquire (&fs_lock);
+  fs_lock_acquire ();
   file_seek (fd->file, pos);
-  lock_release (&fs_lock);
+  fs_lock_release ();
 }
 
 void
@@ -312,9 +308,9 @@ sys_tell (struct intr_frame *if_)
       return;
     }
 
-  lock_acquire (&fs_lock);
+  fs_lock_acquire ();
   pos = file_tell (fd->file);
-  lock_release (&fs_lock);
+  fs_lock_release ();
 
   if_->eax = pos;
 }
@@ -334,9 +330,9 @@ sys_close (struct intr_frame *if_)
       return;
     }
 
-  lock_acquire (&fs_lock);
+  fs_lock_acquire ();
   file_close (fd->file);
-  lock_release (&fs_lock);
+  fs_lock_release ();
 
   list_remove (&fd->elem);
   palloc_free_page (fd);
