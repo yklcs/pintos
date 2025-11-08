@@ -16,8 +16,9 @@ typedef int mapid_t;
 #define READDIR_MAX_LEN 14
 
 /* Typical return values from main() and arguments to exit(). */
-#define EXIT_SUCCESS 0 /* Successful execution. */
-#define EXIT_FAILURE 1 /* Unsuccessful execution. */
+#define EXIT_SUCCESS 0   /* Successful execution. */
+#define EXIT_FAILURE 1   /* Unsuccessful execution. */
+#define EXIT_CRITICAL -1 /* Critical execution failure. */
 
 /* Projects 2 and later. */
 void halt (void) NO_RETURN;

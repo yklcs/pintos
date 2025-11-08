@@ -6,6 +6,10 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <list.h>
+#include <user/syscall.h>
+#include "stddef.h"
+#include "threads/synch.h"
 #include "userprog/gdt.h"
 #include "userprog/pagedir.h"
 #include "userprog/tss.h"
@@ -22,76 +26,10 @@
 static thread_func start_process NO_RETURN;
 static bool load (const char *cmdline, void (**eip) (void), void **esp);
 
-#define MAX_ARGC 128
+void init_process (struct process *);
 
-struct args
-{
-  char *argv[MAX_ARGC]; /* Parsed arguments (128 limit) */
-  int argc;             /* Length of argv */
-  char *_page;          /* Page for strings contained in argv */
-};
-
-/* Parses cmd into argv, and returns the number of parsed arugments. */
-int
-parse_args (char *cmd, char **argv)
-{
-  int argc = 0;
-  char *tok, *p;
-
-  for (tok = strtok_r (cmd, " ", &p); tok != NULL;
-       tok = strtok_r (NULL, " ", &p))
-    argv[argc++] = tok;
-
-  return argc;
-}
-
-/* Pushes  */
-void
-push_args (struct args *args, struct intr_frame *if_)
-{
-  int i;
-  int len;
-  char **argv_ptr;
-
-  // void **esp = &if_->esp;
-  char *arg_ptrs[MAX_ARGC];
-
-  /* Argument data */
-  for (i = args->argc - 1; i >= 0; i--)
-    {
-      len = strlen (args->argv[i]) + 1;
-      if_->esp -= len;
-      strlcpy (if_->esp, args->argv[i], len);
-      arg_ptrs[i] = if_->esp;
-    }
-
-  /* Align down */
-  if_->esp = (void *)((uintptr_t)if_->esp & ~(uintptr_t)3);
-
-  /* Null termination for argv */
-  if_->esp -= sizeof (char *);
-  *(char **)if_->esp = NULL;
-
-  /* argv  */
-  for (i = args->argc - 1; i >= 0; i--)
-    {
-      if_->esp -= sizeof (char *);
-      *(char **)if_->esp = arg_ptrs[i];
-    }
-
-  /* argv pointer  */
-  argv_ptr = if_->esp;
-  if_->esp -= sizeof (char **);
-  *(char ***)if_->esp = argv_ptr;
-
-  /* argc */
-  if_->esp -= sizeof (int);
-  *(int *)if_->esp = args->argc;
-
-  /* Return address */
-  if_->esp -= sizeof (void *);
-  *(void **)if_->esp = NULL;
-}
+int parse_args (char *, char **);
+void push_args (struct process *, struct intr_frame *);
 
 /* Starts a new thread running a user program loaded from
    FILENAME.  The new thread may be scheduled (and may even exit)
@@ -100,55 +38,72 @@ push_args (struct args *args, struct intr_frame *if_)
 tid_t
 process_execute (const char *cmd)
 {
-  tid_t tid;
+  struct process *child;
 
-  struct args *args = palloc_get_page (PAL_ZERO);
-  if (args == NULL)
+  /* Allocate and initialize child process structure */
+  child = palloc_get_page (PAL_ZERO);
+  if (child == NULL)
     return TID_ERROR;
+  init_process (child);
 
-  /* Make a copy of cmd to use for args.
+  /* Make a copy of cmd to use for the child.
      Otherwise there's a race between the caller and load(). */
-  args->_page = palloc_get_page (0);
-  if (args->_page == NULL)
+  child->argstrs = palloc_get_page (0);
+  if (child->argstrs == NULL)
     return TID_ERROR;
-  strlcpy (args->_page, cmd, PGSIZE);
+  strlcpy (child->argstrs, cmd, PGSIZE);
 
-  args->argc = parse_args (args->_page, args->argv);
+  /* Parse cmdline args */
+  child->argc = parse_args (child->argstrs, child->argv);
 
-  /* Create a new thread to execute FILE_NAME. */
-  tid = thread_create (args->argv[0], PRI_DEFAULT, start_process, args);
-  if (tid == TID_ERROR)
+  /* Create a new thread to execute argv[0]. */
+  child->pid
+      = thread_create (child->argv[0], PRI_DEFAULT, start_process, child);
+  if (child->pid == TID_ERROR)
     {
-      palloc_free_page (args->_page);
-      palloc_free_page (args);
+      palloc_free_page (child->argstrs);
+      palloc_free_page (child);
+      return PID_ERROR;
     }
-  return tid;
+
+  /* Wait until child is done loading */
+  sema_down (&child->loaded);
+  if (!child->load_success)
+    return PID_ERROR;
+
+  return child->pid;
 }
 
 /* A thread function that loads a user process and starts it
    running. */
 static void
-start_process (void *args_)
+start_process (void *proc_)
 {
-  struct args *args = args_;
+  struct process *proc = proc_;
   struct intr_frame if_;
-  bool success;
+
+  /* Associate current thread with process */
+  thread_current ()->process = proc;
 
   /* Initialize interrupt frame and load executable. */
   memset (&if_, 0, sizeof if_);
   if_.gs = if_.fs = if_.es = if_.ds = if_.ss = SEL_UDSEG;
   if_.cs = SEL_UCSEG;
   if_.eflags = FLAG_IF | FLAG_MBS;
-  success = load (args->argv[0], &if_.eip, &if_.esp);
+  proc->load_success = load (proc->argv[0], &if_.eip, &if_.esp);
+
+  /* Signal parent thread that loading is complete */
+  sema_up (&proc->loaded);
+
+  /* Exit on load failure */
+  if (!proc->load_success)
+    {
+      proc->exit_code = EXIT_CRITICAL;
+      thread_exit ();
+    }
 
   /* Push arguments onto stack */
-  push_args (args, &if_);
-  palloc_free_page (args->_page);
-  palloc_free_page (args);
-
-  /* If load failed, quit. */
-  if (!success)
-    thread_exit ();
+  push_args (proc, &if_);
 
   /* Start the user process by simulating a return from an
      interrupt, implemented by intr_exit (in
@@ -172,8 +127,32 @@ start_process (void *args_)
 int
 process_wait (tid_t child_tid UNUSED)
 {
-  while (1)
-    ;
+  struct thread *t = thread_current ();
+  struct list_elem *pos, *next;
+  struct process *child;
+  int child_exit_code;
+
+  list_foreach (&t->children, pos, next)
+  {
+    child = list_entry (pos, struct process, elem);
+    if (child->pid == child_tid)
+      {
+        /* Remove from children, so that further waits are impossible */
+        list_remove (pos);
+
+        /* Wait until child exits */
+        sema_down (&child->exited);
+        child_exit_code = child->exit_code;
+
+        /* Destroy current process structure */
+        palloc_free_page (child->argstrs);
+        palloc_free_page (child);
+        t->process = NULL;
+
+        return child_exit_code;
+      }
+  }
+
   return -1;
 }
 
@@ -182,7 +161,14 @@ void
 process_exit (void)
 {
   struct thread *cur = thread_current ();
+  struct process *proc = cur->process;
   uint32_t *pd;
+
+  /* Print termination message */
+  printf ("%s: exit(%d)\n", proc->argv[0], proc->exit_code);
+
+  /* Signal waiting parent */
+  sema_up (&proc->exited);
 
   /* Destroy the current process's page directory and switch back
      to the kernel-only page directory. */
@@ -216,6 +202,86 @@ process_activate (void)
   /* Set thread's kernel stack for use in processing
      interrupts. */
   tss_update ();
+}
+
+void
+init_process (struct process *proc)
+{
+  struct thread *t = thread_current ();
+
+  proc->pid = PID_ERROR;
+
+  proc->argc = 0;
+  proc->argstrs = NULL;
+
+  proc->exit_code = EXIT_CRITICAL;
+  sema_init (&proc->exited, 0);
+
+  sema_init (&proc->loaded, 0);
+  proc->load_success = false;
+
+  list_push_back (&t->children, &proc->elem);
+}
+
+/* Parses cmd into argv, and returns the number of parsed arguments. */
+int
+parse_args (char *cmd, char **argv)
+{
+  int argc = 0;
+  char *tok, *p;
+
+  for (tok = strtok_r (cmd, " ", &p); tok != NULL;
+       tok = strtok_r (NULL, " ", &p))
+    argv[argc++] = tok;
+
+  return argc;
+}
+
+/* Push arguments onto interrupt frame stack. */
+void
+push_args (struct process *proc, struct intr_frame *if_)
+{
+  int i;
+  int len;
+  char **argv_ptr;
+
+  char *arg_ptrs[MAX_ARGC];
+
+  /* Argument data */
+  for (i = proc->argc - 1; i >= 0; i--)
+    {
+      len = strlen (proc->argv[i]) + 1;
+      if_->esp -= len;
+      strlcpy (if_->esp, proc->argv[i], len);
+      arg_ptrs[i] = if_->esp;
+    }
+
+  /* Align down */
+  if_->esp = (void *)((uintptr_t)if_->esp & ~(uintptr_t)3);
+
+  /* Null termination for argv */
+  if_->esp -= sizeof (char *);
+  *(char **)if_->esp = NULL;
+
+  /* argv  */
+  for (i = proc->argc - 1; i >= 0; i--)
+    {
+      if_->esp -= sizeof (char *);
+      *(char **)if_->esp = arg_ptrs[i];
+    }
+
+  /* argv pointer  */
+  argv_ptr = if_->esp;
+  if_->esp -= sizeof (char **);
+  *(char ***)if_->esp = argv_ptr;
+
+  /* argc */
+  if_->esp -= sizeof (int);
+  *(int *)if_->esp = proc->argc;
+
+  /* Return address */
+  if_->esp -= sizeof (void *);
+  *(void **)if_->esp = NULL;
 }
 
 /* We load ELF binaries.  The following definitions are taken
