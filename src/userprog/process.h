@@ -30,6 +30,7 @@ struct process
 
   struct semaphore loaded;
   bool load_success;
+  struct file *executable;
 
   struct list fds;
   int num_fds;
