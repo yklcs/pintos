@@ -1,5 +1,7 @@
 #include "userprog/syscall.h"
+#include "threads/vaddr.h"
 #include "userprog/process.h"
+#include <user/syscall.h>
 #include <stdio.h>
 #include <syscall-nr.h>
 #include "devices/shutdown.h"
@@ -37,7 +39,6 @@ syscall_handler (struct intr_frame *if_)
 {
   int syscall_num;
   get_user (syscall_num, if_->esp);
-  // int syscall_num = *(int *)if_->esp;
 
   sys_fn *sys_fns[] = {
     [SYS_HALT] = sys_halt,     [SYS_EXIT] = sys_exit,
@@ -63,8 +64,8 @@ sys_exit (struct intr_frame *if_)
 {
   struct process *proc = thread_current ()->process;
   int exit_code;
-  get_user (exit_code, if_->esp + sizeof (int));
 
+  get_user (exit_code, if_->esp + sizeof (int));
   proc->exit_code = exit_code;
   thread_exit ();
 }
@@ -72,36 +73,55 @@ sys_exit (struct intr_frame *if_)
 void
 sys_exec (struct intr_frame *if_)
 {
+
+  pid_t child;
+  const char *cmd;
+
+  get_user (cmd, if_->esp + sizeof (int));
+  strnlen_user (cmd, PGSIZE);
+  child = process_execute (cmd);
+
+  if_->eax = child;
 }
 
 void
 sys_wait (struct intr_frame *if_)
 {
+  pid_t child;
+  int child_exit_code;
+  get_user (child, if_->esp + sizeof (int));
+  child_exit_code = process_wait (child);
+  if_->eax = child_exit_code;
 }
 
 void
 sys_create (struct intr_frame *if_)
 {
+  thread_exit ();
 }
 
 void
 sys_remove (struct intr_frame *if_)
 {
+  thread_exit ();
 }
 
 void
 sys_open (struct intr_frame *if_)
 {
+  thread_exit ();
 }
 
 void
 sys_filesize (struct intr_frame *if_)
 {
+  thread_exit ();
 }
 
 void
 sys_read (struct intr_frame *if_)
 {
+  thread_exit ();
 }
 
 void
@@ -120,14 +140,17 @@ sys_write (struct intr_frame *if_)
 void
 sys_seek (struct intr_frame *if_)
 {
+  thread_exit ();
 }
 
 void
 sys_tell (struct intr_frame *if_)
 {
+  thread_exit ();
 }
 
 void
 sys_close (struct intr_frame *if_)
 {
+  thread_exit ();
 }
