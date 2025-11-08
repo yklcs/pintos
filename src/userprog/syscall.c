@@ -5,6 +5,7 @@
 #include "devices/shutdown.h"
 #include "threads/interrupt.h"
 #include "threads/thread.h"
+#include "userprog/uaccess.h"
 
 static void syscall_handler (struct intr_frame *);
 
@@ -34,7 +35,9 @@ syscall_init (void)
 static void
 syscall_handler (struct intr_frame *if_)
 {
-  int syscall_num = *(int *)if_->esp;
+  int syscall_num;
+  get_user (syscall_num, if_->esp);
+  // int syscall_num = *(int *)if_->esp;
 
   sys_fn *sys_fns[] = {
     [SYS_HALT] = sys_halt,     [SYS_EXIT] = sys_exit,
@@ -59,7 +62,8 @@ void
 sys_exit (struct intr_frame *if_)
 {
   struct process *proc = thread_current ()->process;
-  int exit_code = *(int *)(if_->esp + 4);
+  int exit_code;
+  get_user (exit_code, if_->esp + sizeof (int));
 
   proc->exit_code = exit_code;
   thread_exit ();
