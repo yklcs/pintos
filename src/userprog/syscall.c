@@ -1,6 +1,14 @@
 #include "userprog/syscall.h"
+#include "devices/input.h"
+#include "filesys/file.h"
+#include "filesys/filesys.h"
+#include "list.h"
+#include "stdio.h"
+#include "threads/palloc.h"
+#include "threads/synch.h"
 #include "threads/vaddr.h"
 #include "userprog/process.h"
+#include <stddef.h>
 #include <user/syscall.h>
 #include <stdio.h>
 #include <syscall-nr.h>
@@ -8,6 +16,8 @@
 #include "threads/interrupt.h"
 #include "threads/thread.h"
 #include "userprog/uaccess.h"
+
+struct semaphore fs_lock;
 
 static void syscall_handler (struct intr_frame *);
 
@@ -31,6 +41,7 @@ sys_fn sys_close;
 void
 syscall_init (void)
 {
+  sema_init (&fs_lock, 1);
   intr_register_int (0x30, 3, INTR_ON, syscall_handler, "syscall");
 }
 
@@ -78,7 +89,7 @@ sys_exec (struct intr_frame *if_)
   const char *cmd;
 
   get_user (cmd, if_->esp + sizeof (int));
-  strnlen_user (cmd, PGSIZE);
+  strnlen_user (cmd, PGSIZE); /* Performs validation */
   child = process_execute (cmd);
 
   if_->eax = child;
@@ -89,68 +100,252 @@ sys_wait (struct intr_frame *if_)
 {
   pid_t child;
   int child_exit_code;
+
   get_user (child, if_->esp + sizeof (int));
   child_exit_code = process_wait (child);
+
   if_->eax = child_exit_code;
 }
 
 void
 sys_create (struct intr_frame *if_)
 {
-  thread_exit ();
+  char *filename;
+  unsigned size;
+  bool ok;
+
+  get_user (filename, if_->esp + sizeof (int));
+  get_user (size, if_->esp + sizeof (int) + sizeof (char *));
+  strnlen_user (filename, PGSIZE); /* Performs validation */
+
+  sema_down (&fs_lock);
+  ok = filesys_create (filename, size);
+  sema_up (&fs_lock);
+
+  if_->eax = ok;
 }
 
 void
 sys_remove (struct intr_frame *if_)
 {
-  thread_exit ();
+  char *filename;
+  bool ok;
+
+  get_user (filename, if_->esp + sizeof (int));
+  strnlen_user (filename, PGSIZE); /* Performs validation */
+
+  sema_down (&fs_lock);
+  ok = filesys_remove (filename);
+  sema_up (&fs_lock);
+
+  if_->eax = ok;
 }
 
 void
 sys_open (struct intr_frame *if_)
 {
-  thread_exit ();
+  char *filename;
+  struct fd *fd;
+  struct process *proc = thread_current ()->process;
+
+  get_user (filename, if_->esp + sizeof (int));
+  strnlen_user (filename, PGSIZE); /* Performs validation */
+
+  fd = palloc_get_page (PAL_ZERO);
+  if (fd == NULL)
+    {
+      if_->eax = -1;
+      return;
+    }
+
+  sema_down (&fs_lock);
+  fd->file = filesys_open (filename);
+  sema_up (&fs_lock);
+
+  if (fd->file == NULL)
+    {
+      palloc_free_page (fd);
+      if_->eax = -1;
+      return;
+    }
+
+  fd->num = proc->num_fds++;
+  list_push_back (&proc->fds, &fd->elem);
+
+  if_->eax = fd->num;
+}
+
+struct fd *
+find_fd (struct process *proc, int fdnum)
+{
+  struct list_elem *pos, *next;
+  struct fd *fd;
+
+  list_foreach (&proc->fds, pos, next)
+  {
+    fd = list_entry (pos, struct fd, elem);
+    if (fd->num == fdnum)
+      return fd;
+  }
+
+  return NULL;
 }
 
 void
 sys_filesize (struct intr_frame *if_)
 {
-  thread_exit ();
+  struct fd *fd;
+  int fdnum;
+  struct process *proc = thread_current ()->process;
+  int filesize;
+
+  get_user (fdnum, if_->esp + sizeof (int));
+  if ((fd = find_fd (proc, fdnum)) == NULL)
+    {
+      if_->eax = -1;
+      return;
+    }
+
+  sema_down (&fs_lock);
+  filesize = file_length (fd->file);
+  sema_up (&fs_lock);
+
+  if_->eax = filesize;
 }
 
 void
 sys_read (struct intr_frame *if_)
 {
-  thread_exit ();
+  struct fd *fd;
+  char *buf;
+  unsigned size;
+  int fdnum;
+  struct process *proc = thread_current ()->process;
+  unsigned n;
+
+  get_user (fdnum, if_->esp + sizeof (int));
+  get_user (buf, if_->esp + sizeof (int) + sizeof (int));
+  get_user (size, if_->esp + sizeof (int) + sizeof (int) + sizeof (void *));
+
+  validate_uaddrs (buf, size);
+
+  if (fdnum == STDIN_FILENO)
+    {
+      for (n = 0; n < size; n++)
+        buf[n] = input_getc ();
+      if_->eax = size;
+      return;
+    }
+
+  if ((fd = find_fd (proc, fdnum)) == NULL)
+    {
+      if_->eax = -1;
+      return;
+    }
+
+  sema_down (&fs_lock);
+  n = file_read (fd->file, buf, size);
+  sema_up (&fs_lock);
+
+  if_->eax = n;
 }
 
 void
 sys_write (struct intr_frame *if_)
 {
-  int fd = *(int *)(if_->esp + 4);
-  const char *buf = *(const char **)(if_->esp + 8);
-  unsigned size = *(unsigned *)(if_->esp + 12);
+  struct fd *fd;
+  char *buf;
+  unsigned size;
+  int fdnum;
+  struct process *proc = thread_current ()->process;
+  unsigned n;
 
-  if (fd == 1)
+  get_user (fdnum, if_->esp + sizeof (int));
+  get_user (buf, if_->esp + sizeof (int) + sizeof (int));
+  get_user (size, if_->esp + sizeof (int) + sizeof (int) + sizeof (void *));
+
+  validate_uaddrs (buf, size);
+
+  if (fdnum == STDOUT_FILENO)
     {
       putbuf (buf, size);
+      if_->eax = size;
+      return;
     }
+
+  if ((fd = find_fd (proc, fdnum)) == NULL)
+    {
+      if_->eax = -1;
+      return;
+    }
+
+  sema_down (&fs_lock);
+  n = file_write (fd->file, buf, size);
+  sema_up (&fs_lock);
+
+  if_->eax = n;
 }
 
 void
 sys_seek (struct intr_frame *if_)
 {
-  thread_exit ();
+  struct fd *fd;
+  int fdnum;
+  int pos;
+  struct process *proc = thread_current ()->process;
+  int filesize;
+
+  get_user (fdnum, if_->esp + sizeof (int));
+  get_user (pos, if_->esp + sizeof (int) + sizeof (int));
+  if ((fd = find_fd (proc, fdnum)) == NULL)
+    {
+      return;
+    }
+
+  sema_down (&fs_lock);
+  file_seek (fd->file, pos);
+  sema_up (&fs_lock);
 }
 
 void
 sys_tell (struct intr_frame *if_)
 {
   thread_exit ();
+  struct fd *fd;
+  int fdnum;
+  int pos;
+  struct process *proc = thread_current ()->process;
+  int filesize;
+
+  get_user (fdnum, if_->esp + sizeof (int));
+  if ((fd = find_fd (proc, fdnum)) == NULL)
+    {
+      if_->eax = -1;
+      return;
+    }
+
+  sema_down (&fs_lock);
+  pos = file_tell (fd->file);
+  sema_up (&fs_lock);
+
+  if_->eax = pos;
 }
 
 void
 sys_close (struct intr_frame *if_)
 {
-  thread_exit ();
+  struct fd *fd;
+  int fdnum;
+  struct process *proc = thread_current ()->process;
+
+  get_user (fdnum, if_->esp + sizeof (int));
+  if ((fd = find_fd (proc, fdnum)) == NULL)
+    {
+      if_->eax = -1;
+      return;
+    }
+
+  file_close (fd->file);
+  list_remove (&fd->elem);
+  palloc_free_page (fd);
 }

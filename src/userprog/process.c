@@ -50,7 +50,10 @@ process_execute (const char *cmd)
      Otherwise there's a race between the caller and load(). */
   child->argstrs = palloc_get_page (0);
   if (child->argstrs == NULL)
-    return TID_ERROR;
+    {
+      palloc_free_page (child);
+      return TID_ERROR;
+    }
   strlcpy (child->argstrs, cmd, PGSIZE);
 
   /* Parse cmdline args */
@@ -159,9 +162,12 @@ process_wait (tid_t child_tid UNUSED)
 void
 process_exit (void)
 {
-  struct thread *cur = thread_current ();
-  struct process *proc = cur->process;
+  struct thread *t = thread_current ();
+  struct process *proc = t->process;
+  struct fd *fd;
   uint32_t *pd;
+
+  struct list_elem *pos, *next;
 
   /* Print termination message */
   printf ("%s: exit(%d)\n", proc->argv[0], proc->exit_code);
@@ -169,9 +175,18 @@ process_exit (void)
   /* Signal waiting parent */
   sema_up (&proc->exited);
 
+  /* Destroy open files */
+  list_foreach (&proc->fds, pos, next)
+  {
+    fd = list_entry (pos, struct fd, elem);
+    file_close (fd->file);
+    list_remove (pos);
+    palloc_free_page (fd);
+  }
+
   /* Destroy the current process's page directory and switch back
      to the kernel-only page directory. */
-  pd = cur->pagedir;
+  pd = t->pagedir;
   if (pd != NULL)
     {
       /* Correct ordering here is crucial.  We must set
@@ -181,7 +196,7 @@ process_exit (void)
          directory before destroying the process's page
          directory, or our active page directory will be one
          that's been freed (and cleared). */
-      cur->pagedir = NULL;
+      t->pagedir = NULL;
       pagedir_activate (NULL);
       pagedir_destroy (pd);
     }
@@ -218,6 +233,9 @@ init_process (struct process *proc)
 
   sema_init (&proc->loaded, 0);
   proc->load_success = false;
+
+  list_init (&proc->fds);
+  proc->num_fds = 2; /* stdio are already taken */
 
   list_push_back (&t->children, &proc->elem);
 }

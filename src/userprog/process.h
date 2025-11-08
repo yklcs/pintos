@@ -31,6 +31,16 @@ struct process
   struct semaphore loaded;
   bool load_success;
 
+  struct list fds;
+  int num_fds;
+
+  struct list_elem elem;
+};
+
+struct fd
+{
+  struct file *file;
+  int num;
   struct list_elem elem;
 };
 
