@@ -20,6 +20,15 @@ function format-check {
 }
 
 function format {
-    echo "Formatting files in $PINTOSPATH"
+  echo "Formatting files in $PINTOSPATH"
   clang-format -i $PINTOSPATH/src/**/*.c $PINTOSPATH/src/**/*.h
+}
+
+function loop() {
+  count=$1
+  command=${@:2}
+  for i in $(seq $count); do
+    echo "[$i/$count] $command"
+    eval $command
+  done 
 }
