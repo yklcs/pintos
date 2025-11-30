@@ -1,8 +1,8 @@
 #include "userprog/uaccess.h"
 #include "threads/thread.h"
 #include "threads/vaddr.h"
-#include "userprog/pagedir.h"
 #include "userprog/process.h"
+#include "vm/page.h"
 #include <stddef.h>
 #include <user/syscall.h>
 #include <stdbool.h>
@@ -22,8 +22,8 @@ validate_uaddr (const void *uaddr)
       thread_exit ();
     }
 
-  /* Check pagedir */
-  if (pagedir_get_page (t->pagedir, uaddr) == NULL)
+  /* Check page_map */
+  if (!page_find (uaddr))
     {
       t->process->exit_code = EXIT_CRITICAL;
       thread_exit ();

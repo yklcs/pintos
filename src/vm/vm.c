@@ -23,6 +23,14 @@ vm_process_init (void)
   return page_map_init (&t->page_map);
 }
 
+void
+vm_process_exit (void)
+{
+  struct thread *t = thread_current ();
+  page_map_destroy (&t->page_map);
+  frame_process_cleanup (t);
+}
+
 bool
 vm_map_file (vm_upage upage, bool writable, struct file *file, off_t ofs,
              uint32_t read_bytes, uint32_t zero_bytes, bool file_writable)
@@ -121,4 +129,14 @@ vm_load (vm_upage upage)
   page->loc = VM_LOC_MEM;
 
   return true;
+}
+
+bool
+vm_fault (void *uaddr)
+{
+  vm_upage upage = pg_round_down (uaddr);
+  // if (!is_user_vaddr (upage))
+  //   return false;
+
+  return vm_load (upage);
 }

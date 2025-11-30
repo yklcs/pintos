@@ -55,6 +55,8 @@ struct page
 };
 
 bool page_map_init (struct page_map *map);
-struct page *page_find (vm_upage upage);
+void page_map_destroy (struct page_map *map);
+
+struct page *page_find (const void *uaddr);
 
 #endif /* vm/page.h */

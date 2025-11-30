@@ -1,5 +1,4 @@
 #include <stdint.h>
-#include <stdio.h>
 #include "threads/palloc.h"
 #include "threads/synch.h"
 #include "threads/malloc.h"
@@ -7,21 +6,19 @@
 #include "threads/vaddr.h"
 #include "vm/frame.h"
 
-/* Number of user pages that fit in physical memory. */
-extern size_t user_pages;
-
 /* Global frame table structure. */
 static struct
 {
   struct frame *frames;
+  int len;
   struct lock lock;
 } frame_table;
 
 struct frame *
-frame_find (vm_kpage kpage)
+frame_find (void *kaddr)
 {
-  void *ppage = (void *)(vtop (kpage));
-  return frame_table.frames + pg_no (ppage);
+  void *off = kaddr - (uintptr_t)(pool_base (true));
+  return frame_table.frames + pg_no (off);
 }
 
 vm_kpage
@@ -55,24 +52,49 @@ frame_free (vm_kpage kpage)
 
   f = frame_find (kpage);
   if (f == NULL)
-    return NULL;
+    return false;
   f->page = NULL;
   f->owner = NULL;
 
   lock_release (&frame_table.lock);
 
   palloc_free_page (kpage);
+  return true;
 }
 
 void
 frame_table_init (void)
 {
-  frame_table.frames = calloc (user_pages, sizeof (struct frame));
-  for (uintptr_t i = 0; i < user_pages; i++)
+  int i;
+  struct frame *frame;
+
+  frame_table.len = pool_size (true);
+  frame_table.frames = calloc (frame_table.len, sizeof (struct frame));
+  for (i = 0; i < frame_table.len; i++)
     {
-      *(vm_kpage *)&frame_table.frames[i].kpage = (void *)(i * PGSIZE);
-      frame_table.frames[i].page = NULL;
-      frame_table.frames[i].owner = NULL;
+      frame = &frame_table.frames[i];
+      *(vm_kpage *)&frame->kpage = (void *)(i * PGSIZE);
+      frame->page = NULL;
+      frame->owner = NULL;
     }
   lock_init (&frame_table.lock);
+}
+
+void
+frame_process_cleanup (struct thread *t)
+{
+  int i;
+  struct frame *frame;
+
+  lock_acquire (&frame_table.lock);
+  for (i = 0; i < frame_table.len; i++)
+    {
+      frame = &frame_table.frames[i];
+      if (frame->owner == t)
+        {
+          frame->page = NULL;
+          frame->owner = NULL;
+        }
+    }
+  lock_release (&frame_table.lock);
 }

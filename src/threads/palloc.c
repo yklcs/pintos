@@ -40,9 +40,6 @@ static void init_pool (struct pool *, void *base, size_t page_cnt,
                        const char *name);
 static bool page_from_pool (const struct pool *, void *page);
 
-/* Number of kernel and user pages in system */
-size_t kernel_pages, user_pages;
-
 /* Initializes the page allocator.  At most USER_PAGE_LIMIT
    pages are put into the user pool. */
 void
@@ -52,7 +49,8 @@ palloc_init (size_t user_page_limit)
   uint8_t *free_start = ptov (1024 * 1024);
   uint8_t *free_end = ptov (init_ram_pages * PGSIZE);
   size_t free_pages = (free_end - free_start) / PGSIZE;
-  user_pages = free_pages / 2;
+  size_t user_pages = free_pages / 2;
+  size_t kernel_pages;
   if (user_pages > user_page_limit)
     user_pages = user_page_limit;
   kernel_pages = free_pages - user_pages;
@@ -181,4 +179,20 @@ page_from_pool (const struct pool *pool, void *page)
   size_t end_page = start_page + bitmap_size (pool->used_map);
 
   return page_no >= start_page && page_no < end_page;
+}
+
+size_t
+pool_size (bool user)
+{
+  if (user)
+    return bitmap_size (user_pool.used_map);
+  return bitmap_size (kernel_pool.used_map);
+}
+
+void *
+pool_base (bool user)
+{
+  if (user)
+    return user_pool.base;
+  return kernel_pool.base;
 }

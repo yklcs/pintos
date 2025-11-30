@@ -23,6 +23,9 @@
 #include "threads/palloc.h"
 #include "threads/thread.h"
 #include "threads/vaddr.h"
+#include "threads/malloc.h"
+#include "vm/addr.h"
+#include "vm/page.h"
 #include "vm/vm.h"
 
 static thread_func start_process NO_RETURN;
@@ -203,6 +206,8 @@ process_exit (void)
   sema_down (&proc->reaped); /* Wait until parent reaps */
   palloc_free_page (proc->argbuf);
   palloc_free_page (proc);
+
+  vm_process_exit ();
 
   /* Destroy the current process's page directory and switch back
      to the kernel-only page directory. */
@@ -597,9 +602,6 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
                         page_zero_bytes, false))
         return false;
 
-      if (!vm_load (upage))
-        return false;
-
       /* Advance. */
       read_bytes -= page_read_bytes;
       zero_bytes -= page_zero_bytes;
@@ -614,19 +616,16 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
 static bool
 setup_stack (void **esp)
 {
-  uint8_t *kpage;
-  bool success = false;
+  vm_upage upage = PHYS_BASE - PGSIZE;
 
-  kpage = palloc_get_page (PAL_USER | PAL_ZERO);
-  if (kpage != NULL)
-    {
-      success = install_page (((uint8_t *)PHYS_BASE) - PGSIZE, kpage, true);
-      if (success)
-        *esp = PHYS_BASE;
-      else
-        palloc_free_page (kpage);
-    }
-  return success;
+  if (!vm_map_zero (upage, true))
+    return false;
+
+  if (!vm_load (upage))
+    return false;
+
+  *esp = PHYS_BASE;
+  return true;
 }
 
 /* Adds a mapping from user virtual address UPAGE to kernel
