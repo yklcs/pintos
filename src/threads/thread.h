@@ -4,6 +4,7 @@
 #include <debug.h>
 #include <list.h>
 #include <stdint.h>
+#include "vm/page.h"
 
 /* States in a thread's life cycle. */
 enum thread_status
@@ -98,6 +99,10 @@ struct thread
   uint32_t *pagedir; /* Page directory. */
   struct process *process;
   struct list children; /* List of children processes. */
+#endif
+
+#ifdef VM
+  struct page_map page_map;
 #endif
 
   /* Owned by thread.c. */
