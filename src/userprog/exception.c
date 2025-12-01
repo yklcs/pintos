@@ -152,6 +152,9 @@ page_fault (struct intr_frame *f)
   if (not_present && vm_fault (fault_addr))
     return;
 
+  if (not_present && vm_grow_stack (fault_addr, f->esp))
+    return;
+
   /* To implement virtual memory, delete the rest of the function
      body, and replace it with code that brings in the page to
      which fault_addr refers. */

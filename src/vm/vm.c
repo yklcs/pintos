@@ -140,3 +140,18 @@ vm_fault (void *uaddr)
 
   return vm_load (upage);
 }
+
+bool
+vm_grow_stack (void *uaddr, void *esp)
+{
+  bool within_limit = uaddr >= PHYS_BASE - STACK_LIMIT;
+  bool near_esp = uaddr >= esp - 32;
+  vm_upage upage;
+
+  if (!within_limit || !near_esp)
+    return false;
+
+  upage = pg_round_down (uaddr);
+  vm_map_zero (upage, true);
+  return vm_load (upage);
+}
