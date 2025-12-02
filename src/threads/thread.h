@@ -103,6 +103,7 @@ struct thread
 
 #ifdef VM
   struct page_map page_map;
+  void *user_esp;
 #endif
 
   /* Owned by thread.c. */
@@ -146,6 +147,6 @@ int thread_get_recent_cpu (void);
 int thread_get_load_avg (void);
 
 void fs_lock_acquire (void);
-void fs_lock_release (void);
+void fs_lock_try_release (void);
 
 #endif /* threads/thread.h */

@@ -1,9 +1,12 @@
 #include "userprog/exception.h"
 #include <inttypes.h>
 #include <stdio.h>
+#include "threads/vaddr.h"
 #include "userprog/gdt.h"
 #include "threads/interrupt.h"
 #include "threads/thread.h"
+#include "userprog/process.h"
+#include "userprog/uaccess.h"
 #include "vm/vm.h"
 
 /* Number of page faults processed. */
@@ -152,8 +155,25 @@ page_fault (struct intr_frame *f)
   if (not_present && vm_fault (fault_addr))
     return;
 
-  if (not_present && vm_grow_stack (fault_addr, f->esp))
+  if (user && not_present && vm_grow_stack (fault_addr, f->esp))
     return;
+
+  if (!user && not_present
+      && vm_grow_stack (fault_addr, thread_current ()->user_esp))
+    return;
+
+  if (user)
+    {
+      thread_current ()->process->exit_code = EXIT_CRITICAL;
+      thread_exit ();
+    }
+
+  if (fault_addr < PHYS_BASE)
+    {
+      f->eip = (void *)f->eax;
+      f->eax = UACCESS_ERROR;
+      return;
+    }
 
   /* To implement virtual memory, delete the rest of the function
      body, and replace it with code that brings in the page to

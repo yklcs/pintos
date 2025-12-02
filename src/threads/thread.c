@@ -47,9 +47,10 @@ fs_lock_acquire ()
 }
 
 void
-fs_lock_release ()
+fs_lock_try_release ()
 {
-  lock_release (&fs_lock);
+  if (lock_held_by_current_thread (&fs_lock))
+    lock_release (&fs_lock);
 }
 
 /* Stack frame for kernel_thread(). */

@@ -9,6 +9,7 @@
 #include "threads/vaddr.h"
 #include "userprog/process.h"
 #include <stddef.h>
+#include <stdint.h>
 #include <user/syscall.h>
 #include <stdio.h>
 #include <syscall-nr.h>
@@ -16,6 +17,8 @@
 #include "threads/interrupt.h"
 #include "threads/thread.h"
 #include "userprog/uaccess.h"
+
+#define BUFSIZE 256
 
 static void syscall_handler (struct intr_frame *);
 
@@ -48,6 +51,7 @@ syscall_handler (struct intr_frame *if_)
 {
   int syscall_num;
   get_user (syscall_num, if_->esp);
+  thread_current ()->user_esp = if_->esp;
 
   sys_fn *sys_fns[] = {
     [SYS_HALT] = sys_halt,     [SYS_EXIT] = sys_exit,
@@ -120,7 +124,7 @@ sys_create (struct intr_frame *if_)
 
   fs_lock_acquire ();
   ok = filesys_create (filename, size);
-  fs_lock_release ();
+  fs_lock_try_release ();
 
   if_->eax = ok;
 }
@@ -136,7 +140,7 @@ sys_remove (struct intr_frame *if_)
 
   fs_lock_acquire ();
   ok = filesys_remove (filename);
-  fs_lock_release ();
+  fs_lock_try_release ();
 
   if_->eax = ok;
 }
@@ -161,7 +165,7 @@ sys_open (struct intr_frame *if_)
 
   fs_lock_acquire ();
   fd->file = filesys_open (filename);
-  fs_lock_release ();
+  fs_lock_try_release ();
 
   /* Failed to open */
   if (fd->file == NULL)
@@ -195,7 +199,7 @@ sys_filesize (struct intr_frame *if_)
 
   fs_lock_acquire ();
   filesize = file_length (fd->file);
-  fs_lock_release ();
+  fs_lock_try_release ();
 
   if_->eax = filesize;
 }
@@ -204,22 +208,24 @@ void
 sys_read (struct intr_frame *if_)
 {
   struct fd *fd;
-  unsigned bytes_read;
+  unsigned chunk_size;
+  unsigned copied = 0;
+  unsigned chunk_copied;
+  uint8_t kbuf[BUFSIZE];
   int fdnum;     /* Arg */
-  char *buf;     /* Arg */
+  char *ubuf;    /* Arg */
   unsigned size; /* Arg */
 
   get_user (fdnum, if_->esp + sizeof (int));
-  get_user (buf, if_->esp + sizeof (int) + sizeof (int));
+  get_user (ubuf, if_->esp + sizeof (int) + sizeof (int));
   get_user (size, if_->esp + sizeof (int) + sizeof (int) + sizeof (void *));
-  validate_uaddrs (buf, size);
 
   /* Read from stdin */
   if (fdnum == STDIN_FILENO)
     {
-      for (bytes_read = 0; bytes_read < size; bytes_read++)
-        buf[bytes_read] = input_getc ();
-      if_->eax = size;
+      for (; copied < size; copied++)
+        put_user (ubuf, input_getc ());
+      if_->eax = copied;
       return;
     }
 
@@ -231,31 +237,52 @@ sys_read (struct intr_frame *if_)
     }
 
   fs_lock_acquire ();
-  bytes_read = file_read (fd->file, buf, size);
-  fs_lock_release ();
 
-  if_->eax = bytes_read;
+  while (size > 0)
+    {
+      chunk_size = size < BUFSIZE ? size : BUFSIZE;
+      chunk_copied = file_read (fd->file, kbuf, chunk_size);
+      copy_to_user (ubuf + copied, kbuf, chunk_copied);
+      copied += chunk_copied;
+      size -= chunk_copied;
+
+      if (chunk_copied != chunk_size)
+        break;
+    }
+
+  fs_lock_try_release ();
+  if_->eax = copied;
 }
 
 void
 sys_write (struct intr_frame *if_)
 {
   struct fd *fd;
-  unsigned bytes_written;
+  unsigned copied = 0;
+  unsigned chunk_copied;
+  unsigned chunk_size;
+  uint8_t kbuf[BUFSIZE];
   int fdnum;     /* Arg */
-  char *buf;     /* Arg */
+  char *ubuf;    /* Arg */
   unsigned size; /* Arg */
 
   get_user (fdnum, if_->esp + sizeof (int));
-  get_user (buf, if_->esp + sizeof (int) + sizeof (int));
-  get_user (size, if_->esp + sizeof (int) + sizeof (int) + sizeof (void *));
-  validate_uaddrs (buf, size);
+  get_user (ubuf, if_->esp + sizeof (int) + sizeof (int));
+  get_user (size, if_->esp + sizeof (int) + sizeof (int) + sizeof (char *));
 
   /* Write to stdout */
   if (fdnum == STDOUT_FILENO)
     {
-      putbuf (buf, size); /* Unbuffered write */
-      if_->eax = size;
+      while (size > 0)
+        {
+          chunk_size = size < BUFSIZE ? size : BUFSIZE;
+          copy_from_user (kbuf, ubuf + copied, chunk_size);
+          putbuf (kbuf, chunk_size);
+          copied += chunk_size;
+          size -= chunk_size;
+        }
+
+      if_->eax = copied;
       return;
     }
 
@@ -267,10 +294,21 @@ sys_write (struct intr_frame *if_)
     }
 
   fs_lock_acquire ();
-  bytes_written = file_write (fd->file, buf, size);
-  fs_lock_release ();
 
-  if_->eax = bytes_written;
+  while (size > 0)
+    {
+      chunk_size = size < BUFSIZE ? size : BUFSIZE;
+      copy_from_user (kbuf, ubuf + copied, chunk_size);
+      chunk_copied = file_write (fd->file, kbuf, chunk_size);
+      copied += chunk_copied;
+      size -= chunk_copied;
+
+      if (chunk_copied != chunk_size)
+        break;
+    }
+
+  fs_lock_try_release ();
+  if_->eax = copied;
 }
 
 void
@@ -289,7 +327,7 @@ sys_seek (struct intr_frame *if_)
 
   fs_lock_acquire ();
   file_seek (fd->file, pos);
-  fs_lock_release ();
+  fs_lock_try_release ();
 }
 
 void
@@ -310,7 +348,7 @@ sys_tell (struct intr_frame *if_)
 
   fs_lock_acquire ();
   pos = file_tell (fd->file);
-  fs_lock_release ();
+  fs_lock_try_release ();
 
   if_->eax = pos;
 }
@@ -332,7 +370,7 @@ sys_close (struct intr_frame *if_)
 
   fs_lock_acquire ();
   file_close (fd->file);
-  fs_lock_release ();
+  fs_lock_try_release ();
 
   list_remove (&fd->elem);
   palloc_free_page (fd);
