@@ -1,3 +1,4 @@
+#include <stdio.h>
 #include <string.h>
 #include "vm/vm.h"
 #include "filesys/file.h"
@@ -8,12 +9,14 @@
 #include "vm/addr.h"
 #include "vm/page.h"
 #include "vm/frame.h"
+#include "vm/swap.h"
 
 /* Initialize the virtual memory system. */
 void
 vm_init (void)
 {
   frame_table_init ();
+  swap_init ();
 }
 
 bool
@@ -27,8 +30,8 @@ void
 vm_process_exit (void)
 {
   struct thread *t = thread_current ();
-  page_map_destroy (&t->page_map);
   frame_process_cleanup (t);
+  page_map_destroy (&t->page_map);
 }
 
 bool
@@ -88,7 +91,7 @@ vm_load (vm_upage upage)
   if (page == NULL)
     return false;
 
-  kpage = frame_alloc (page->upage);
+  kpage = frame_alloc (page);
   if (kpage == NULL)
     return false;
 
@@ -106,12 +109,14 @@ vm_load (vm_upage upage)
         memset (kpage + page->finfo.read_bytes, 0, page->finfo.zero_bytes);
       break;
     case VM_LOC_SWAP:
+      ok = swap_in (page->swinfo.swap_slot, kpage);
       break;
     default:
       ok = false;
     }
   if (!ok)
     {
+      printf ("vm_load: load failure\n");
       frame_free (kpage);
       return false;
     }
@@ -119,6 +124,7 @@ vm_load (vm_upage upage)
   ok = pagedir_set_page (t->pagedir, page->upage, kpage, page->writable);
   if (!ok)
     {
+      printf ("vm_load: pagedir set failure\n");
       frame_free (kpage);
       return false;
     }
@@ -126,6 +132,7 @@ vm_load (vm_upage upage)
   page->frame = frame_find (kpage);
   page->frame->page = page;
   page->frame->owner = t;
+  page->frame->pinned = false;
   page->loc = VM_LOC_MEM;
 
   return true;
@@ -135,8 +142,8 @@ bool
 vm_fault (void *uaddr)
 {
   vm_upage upage = pg_round_down (uaddr);
-  // if (!is_user_vaddr (upage))
-  //   return false;
+  if (!is_user_vaddr (uaddr))
+    return false;
 
   return vm_load (upage);
 }
@@ -148,10 +155,11 @@ vm_grow_stack (void *uaddr, void *esp)
   bool near_esp = uaddr >= esp - 32;
   vm_upage upage;
 
-  if (!within_limit || !near_esp)
+  if (!is_user_vaddr (uaddr) || !within_limit || !near_esp)
     return false;
 
   upage = pg_round_down (uaddr);
   vm_map_zero (upage, true);
+
   return vm_load (upage);
 }

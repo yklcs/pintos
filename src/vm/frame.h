@@ -9,12 +9,14 @@ struct frame
   const vm_kpage kpage;
   struct thread *owner;
   struct page *page;
+  bool pinned;
 };
 
 void frame_table_init (void);
 struct frame *frame_find (vm_kpage kpage);
 vm_kpage frame_alloc (struct page *page);
 bool frame_free (vm_kpage kpage);
+bool frame_evict (vm_kpage kpage);
 void frame_process_cleanup (struct thread *t);
 
 #endif /* vm/frame.h */

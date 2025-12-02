@@ -1,9 +1,15 @@
 #include <stdint.h>
+#include <stdio.h>
+#include "filesys/file.h"
+#include "stddef.h"
 #include "threads/palloc.h"
 #include "threads/synch.h"
 #include "threads/malloc.h"
 #include "threads/thread.h"
 #include "threads/vaddr.h"
+#include "userprog/pagedir.h"
+#include "vm/page.h"
+#include "vm/swap.h"
 #include "vm/frame.h"
 
 /* Global frame table structure. */
@@ -12,31 +18,85 @@ static struct
   struct frame *frames;
   int len;
   struct lock lock;
+
+  int clock_cursor;
 } frame_table;
+
+vm_kpage
+choose_victim ()
+{
+  struct frame *f;
+  struct frame *victim;
+  bool accessed;
+
+  lock_acquire (&frame_table.lock);
+  while (1)
+    {
+      frame_table.clock_cursor
+          = (frame_table.clock_cursor + 1) % frame_table.len;
+      f = frame_table.frames + frame_table.clock_cursor;
+
+      if (f->pinned)
+        continue;
+
+      if (f->owner == NULL)
+        {
+          victim = f;
+          lock_release (&frame_table.lock);
+          return victim->kpage;
+        }
+
+      accessed = pagedir_is_accessed (f->owner->pagedir, f->page->upage);
+      if (!accessed)
+        {
+          victim = frame_table.frames + frame_table.clock_cursor;
+          lock_release (&frame_table.lock);
+          return victim->kpage;
+        }
+      pagedir_set_accessed (f->owner->pagedir, f->page->upage, false);
+    }
+}
 
 struct frame *
 frame_find (void *kaddr)
 {
   void *off = kaddr - (uintptr_t)(pool_base (true));
-  return frame_table.frames + pg_no (off);
+  unsigned idx = pg_no (off);
+  ASSERT (idx < frame_table.len);
+
+  return frame_table.frames + idx;
 }
 
 vm_kpage
 frame_alloc (struct page *page)
 {
   void *kpage = palloc_get_page (PAL_USER);
+
   struct frame *f;
 
   if (kpage == NULL)
-    return NULL;
+    {
+      kpage = choose_victim ();
+      if (!frame_evict (kpage))
+        {
+          printf ("frame_alloc: eviction failure for page 0x%x\n", kpage);
+          return NULL;
+        }
+    }
 
   lock_acquire (&frame_table.lock);
 
   f = frame_find (kpage);
   if (f == NULL)
-    return NULL;
+    {
+      printf ("frame_alloc: frame not found for page 0x%x\n", kpage);
+      lock_release (&frame_table.lock);
+      return NULL;
+    }
+
   f->page = page;
   f->owner = thread_current ();
+  f->pinned = true;
 
   lock_release (&frame_table.lock);
 
@@ -52,13 +112,18 @@ frame_free (vm_kpage kpage)
 
   f = frame_find (kpage);
   if (f == NULL)
-    return false;
+    {
+      printf ("frame_free: could not find frame 0x%x to free \n", kpage);
+      lock_release (&frame_table.lock);
+      return false;
+    }
   f->page = NULL;
   f->owner = NULL;
 
   lock_release (&frame_table.lock);
 
   palloc_free_page (kpage);
+
   return true;
 }
 
@@ -73,10 +138,14 @@ frame_table_init (void)
   for (i = 0; i < frame_table.len; i++)
     {
       frame = &frame_table.frames[i];
-      *(vm_kpage *)&frame->kpage = (void *)(i * PGSIZE);
+      *(vm_kpage *)&frame->kpage
+          = (void *)((uintptr_t)pool_base (true) + i * PGSIZE);
       frame->page = NULL;
       frame->owner = NULL;
+      frame->pinned = false;
     }
+
+  frame_table.clock_cursor = 0;
   lock_init (&frame_table.lock);
 }
 
@@ -92,9 +161,67 @@ frame_process_cleanup (struct thread *t)
       frame = &frame_table.frames[i];
       if (frame->owner == t)
         {
+          pagedir_clear_page (t->pagedir, frame->page->upage);
           frame->page = NULL;
           frame->owner = NULL;
         }
     }
   lock_release (&frame_table.lock);
+}
+
+bool
+frame_evict (vm_kpage kpage)
+{
+  struct thread *t = thread_current ();
+  struct frame *frame;
+  struct page *page;
+
+  frame = frame_find (kpage);
+  if (frame == NULL)
+    {
+      printf ("frame_evict: frame to evict 0x%x not found\n", kpage);
+      return false;
+    }
+
+  if (frame->owner == NULL)
+    {
+      return true;
+    }
+
+  page = frame->page;
+  ASSERT (page->frame == frame);
+
+  switch (page->type)
+    {
+    case VM_PAGE_ANON:
+      if (!swap_out (page))
+        {
+          printf ("frame_evict: failed to swap out 0x%x\n", page->upage);
+          return false;
+        }
+      break;
+    case VM_PAGE_FILE:
+      if (pagedir_is_dirty (frame->owner->pagedir, page->upage))
+        {
+          page->type = VM_PAGE_ANON;
+
+          if (page->finfo.writable)
+            file_write_at (page->finfo.file, kpage, page->finfo.read_bytes,
+                           page->finfo.ofs);
+          else if (!swap_out (page))
+            {
+              printf ("frame_evict: failed to swap out 0x%x failed\n",
+                      page->upage);
+              return false;
+            }
+          break;
+        }
+
+      pagedir_clear_page (frame->owner->pagedir, page->upage);
+      page->loc = VM_LOC_FILE;
+      page->frame = NULL;
+      break;
+    }
+
+  return true;
 }

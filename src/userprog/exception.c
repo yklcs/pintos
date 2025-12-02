@@ -152,6 +152,8 @@ page_fault (struct intr_frame *f)
   write = (f->error_code & PF_W) != 0;
   user = (f->error_code & PF_U) != 0;
 
+  // printf ("page_fault: 0x%x\n", fault_addr);
+
   if (not_present && vm_fault (fault_addr))
     return;
 
@@ -168,7 +170,7 @@ page_fault (struct intr_frame *f)
       thread_exit ();
     }
 
-  if (fault_addr < PHYS_BASE)
+  if (is_user_vaddr (fault_addr))
     {
       f->eip = (void *)f->eax;
       f->eax = UACCESS_ERROR;

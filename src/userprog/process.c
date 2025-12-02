@@ -201,6 +201,8 @@ process_exit (void)
     sema_up (&child->reaped); /* Children are "reaped", no zombies needed */
   }
 
+  vm_process_exit ();
+
   /* Signal to waiting parent that exit code is ready,
      then wait for parent to reap the exit code,
      before freeing all process data. */
@@ -208,8 +210,6 @@ process_exit (void)
   sema_down (&proc->reaped); /* Wait until parent reaps */
   palloc_free_page (proc->argbuf);
   palloc_free_page (proc);
-
-  vm_process_exit ();
 
   /* Destroy the current process's page directory and switch back
      to the kernel-only page directory. */
