@@ -163,11 +163,12 @@ frame_process_cleanup (struct thread *t)
   for (i = 0; i < frame_table.len; i++)
     {
       frame = &frame_table.frames[i];
-      if (frame->owner == t && !frame->pinned)
+      if (frame->owner == t)
         {
           pagedir_clear_page (t->pagedir, frame->page->upage);
           frame->page = NULL;
           frame->owner = NULL;
+          frame->pinned = false;
           palloc_free_page (frame->kpage);
         }
     }
@@ -246,6 +247,9 @@ frame_evict (vm_kpage kpage)
       page->frame = NULL;
       break;
     }
+
+  frame->owner = NULL;
+  frame->page = NULL;
 
   lock_release (&frame_table.lock);
 

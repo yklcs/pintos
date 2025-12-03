@@ -107,8 +107,8 @@ vm_munmap (mapid_t mapid)
                              page->finfo.ofs);
               fs_lock_release ();
             }
-          frame_free (page->frame->kpage);
           pagedir_clear_page (t->pagedir, upage);
+          frame_free (page->frame->kpage);
         }
 
       page->loc = VM_LOC_FILE;
