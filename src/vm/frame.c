@@ -179,6 +179,7 @@ frame_evict (vm_kpage kpage)
   struct thread *t = thread_current ();
   struct frame *frame;
   struct page *page;
+  bool fs_lock_held_ = fs_lock_held ();
 
   lock_acquire (&frame_table.lock);
 
@@ -215,8 +216,14 @@ frame_evict (vm_kpage kpage)
           page->type = VM_PAGE_ANON;
 
           if (page->finfo.writable)
-            file_write_at (page->finfo.file, kpage, page->finfo.read_bytes,
-                           page->finfo.ofs);
+            {
+              if (!fs_lock_held_)
+                fs_lock_acquire ();
+              file_write_at (page->finfo.file, kpage, page->finfo.read_bytes,
+                             page->finfo.ofs);
+              if (!fs_lock_held_)
+                fs_lock_release ();
+            }
           else if (!swap_out (page))
             {
               printf ("frame_evict: failed to swap out 0x%x failed\n",

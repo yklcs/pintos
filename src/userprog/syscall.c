@@ -124,7 +124,7 @@ sys_create (struct intr_frame *if_)
 
   fs_lock_acquire ();
   ok = filesys_create (filename, size);
-  fs_lock_try_release ();
+  fs_lock_release ();
 
   if_->eax = ok;
 }
@@ -140,7 +140,7 @@ sys_remove (struct intr_frame *if_)
 
   fs_lock_acquire ();
   ok = filesys_remove (filename);
-  fs_lock_try_release ();
+  fs_lock_release ();
 
   if_->eax = ok;
 }
@@ -165,7 +165,7 @@ sys_open (struct intr_frame *if_)
 
   fs_lock_acquire ();
   fd->file = filesys_open (filename);
-  fs_lock_try_release ();
+  fs_lock_release ();
 
   /* Failed to open */
   if (fd->file == NULL)
@@ -199,7 +199,7 @@ sys_filesize (struct intr_frame *if_)
 
   fs_lock_acquire ();
   filesize = file_length (fd->file);
-  fs_lock_try_release ();
+  fs_lock_release ();
 
   if_->eax = filesize;
 }
@@ -250,7 +250,7 @@ sys_read (struct intr_frame *if_)
         break;
     }
 
-  fs_lock_try_release ();
+  fs_lock_release ();
   if_->eax = copied;
 }
 
@@ -307,7 +307,7 @@ sys_write (struct intr_frame *if_)
         break;
     }
 
-  fs_lock_try_release ();
+  fs_lock_release ();
   if_->eax = copied;
 }
 
@@ -327,7 +327,7 @@ sys_seek (struct intr_frame *if_)
 
   fs_lock_acquire ();
   file_seek (fd->file, pos);
-  fs_lock_try_release ();
+  fs_lock_release ();
 }
 
 void
@@ -348,7 +348,7 @@ sys_tell (struct intr_frame *if_)
 
   fs_lock_acquire ();
   pos = file_tell (fd->file);
-  fs_lock_try_release ();
+  fs_lock_release ();
 
   if_->eax = pos;
 }
@@ -370,7 +370,7 @@ sys_close (struct intr_frame *if_)
 
   fs_lock_acquire ();
   file_close (fd->file);
-  fs_lock_try_release ();
+  fs_lock_release ();
 
   list_remove (&fd->elem);
   palloc_free_page (fd);

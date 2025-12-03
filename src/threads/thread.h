@@ -147,6 +147,7 @@ int thread_get_recent_cpu (void);
 int thread_get_load_avg (void);
 
 void fs_lock_acquire (void);
-void fs_lock_try_release (void);
+void fs_lock_release (void);
+bool fs_lock_held (void);
 
 #endif /* threads/thread.h */

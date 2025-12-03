@@ -93,6 +93,7 @@ vm_load (vm_upage upage)
 {
   struct thread *t = thread_current ();
   bool ok = false;
+  bool fs_lock_held_ = fs_lock_held ();
 
   struct page *page;
   vm_kpage kpage;
@@ -112,9 +113,14 @@ vm_load (vm_upage upage)
       ok = true;
       break;
     case VM_LOC_FILE:
+      if (!fs_lock_held_)
+        fs_lock_acquire ();
       ok = (file_read_at (page->finfo.file, kpage, page->finfo.read_bytes,
                           page->finfo.ofs)
             == page->finfo.read_bytes);
+      if (!fs_lock_held_)
+        fs_lock_release ();
+
       if (ok)
         memset (kpage + page->finfo.read_bytes, 0, page->finfo.zero_bytes);
       break;

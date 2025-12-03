@@ -180,7 +180,8 @@ process_exit (void)
   /* Print termination message */
   printf ("%s: exit(%d)\n", proc->argv[0], proc->exit_code);
 
-  fs_lock_try_release ();
+  if (fs_lock_held ())
+    fs_lock_release ();
 
   /* Close executable */
   file_close (proc->executable);
@@ -517,7 +518,8 @@ load (const char *file_name, void (**eip) (void), void **esp)
 
 done:
   /* We arrive here whether the load is successful or not. */
-  fs_lock_try_release ();
+  if (fs_lock_held ())
+    fs_lock_release ();
   return success;
 }
 
