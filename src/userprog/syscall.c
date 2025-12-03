@@ -17,6 +17,7 @@
 #include "threads/interrupt.h"
 #include "threads/thread.h"
 #include "userprog/uaccess.h"
+#include "vm/mmap.h"
 
 #define BUFSIZE 256
 
@@ -39,6 +40,8 @@ sys_fn sys_write;
 sys_fn sys_seek;
 sys_fn sys_tell;
 sys_fn sys_close;
+sys_fn sys_mmap;
+sys_fn sys_munmap;
 
 void
 syscall_init (void)
@@ -60,7 +63,8 @@ syscall_handler (struct intr_frame *if_)
     [SYS_OPEN] = sys_open,     [SYS_FILESIZE] = sys_filesize,
     [SYS_READ] = sys_read,     [SYS_WRITE] = sys_write,
     [SYS_SEEK] = sys_seek,     [SYS_TELL] = sys_tell,
-    [SYS_CLOSE] = sys_close,
+    [SYS_CLOSE] = sys_close,   [SYS_MMAP] = sys_mmap,
+    [SYS_MUNMAP] = sys_munmap,
   };
 
   sys_fns[syscall_num](if_);
@@ -374,6 +378,36 @@ sys_close (struct intr_frame *if_)
 
   list_remove (&fd->elem);
   palloc_free_page (fd);
+}
+
+void
+sys_mmap (struct intr_frame *if_)
+{
+  struct fd *fd;
+  int fdnum;      /* Arg */
+  vm_upage upage; /* Arg */
+
+  get_user (fdnum, if_->esp + sizeof (int));
+  get_user (upage, if_->esp + sizeof (int) + sizeof (int));
+
+  /* Find FD */
+  if ((fd = find_fd (fdnum)) == NULL)
+    {
+      if_->eax = -1;
+      return;
+    }
+
+  if_->eax = vm_mmap (fd->file, upage);
+}
+
+void
+sys_munmap (struct intr_frame *if_)
+{
+  mapid_t mapid; /* Arg */
+
+  get_user (mapid, if_->esp + sizeof (int));
+
+  vm_munmap (mapid);
 }
 
 /* Find the given file descriptor of the current process. */

@@ -32,3 +32,24 @@ function loop() {
     eval $command
   done 
 }
+
+function stresstest() {
+  count=$1
+  tmpfile=$(mktemp)
+  expected=$2
+
+  for i in $(seq $count); do
+      echo "[$i/$count] $command"
+      
+      rm build/tests/**/*.{output,result} || true
+      make check -j10 > $tmpfile 2>&1
+
+      if ! grep -Fq "$expected" "$tmpfile"; then        
+          echo "Failed."
+          echo "Captured output:"
+          cat $tmpfile
+          echo "End captured output."
+          return 1
+      fi
+  done
+}

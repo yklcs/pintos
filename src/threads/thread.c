@@ -4,6 +4,7 @@
 #include <random.h>
 #include <stdio.h>
 #include <string.h>
+#include "list.h"
 #include "threads/flags.h"
 #include "threads/interrupt.h"
 #include "threads/intr-stubs.h"
@@ -490,6 +491,10 @@ init_thread (struct thread *t, const char *name, int priority)
   t->process = NULL;
   list_init (&t->children);
 #endif
+
+  list_init (&t->mmaps.mmaps);
+  t->mmaps.count = 0;
+  t->user_esp = NULL;
 
   old_level = intr_disable ();
   list_push_back (&all_list, &t->allelem);

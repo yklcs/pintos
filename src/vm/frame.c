@@ -168,6 +168,7 @@ frame_process_cleanup (struct thread *t)
           pagedir_clear_page (t->pagedir, frame->page->upage);
           frame->page = NULL;
           frame->owner = NULL;
+          palloc_free_page (frame->kpage);
         }
     }
   lock_release (&frame_table.lock);
@@ -217,12 +218,18 @@ frame_evict (vm_kpage kpage)
 
           if (page->finfo.writable)
             {
+              page->type = VM_PAGE_FILE;
+
               if (!fs_lock_held_)
                 fs_lock_acquire ();
               file_write_at (page->finfo.file, kpage, page->finfo.read_bytes,
                              page->finfo.ofs);
               if (!fs_lock_held_)
                 fs_lock_release ();
+
+              pagedir_clear_page (frame->owner->pagedir, page->upage);
+              page->loc = VM_LOC_FILE;
+              page->frame = NULL;
             }
           else if (!swap_out (page))
             {

@@ -5,6 +5,7 @@
 #include <list.h>
 #include <stdint.h>
 #include "vm/page.h"
+#include "vm/mmap.h"
 
 /* States in a thread's life cycle. */
 enum thread_status
@@ -103,6 +104,7 @@ struct thread
 
 #ifdef VM
   struct page_map page_map;
+  struct mmaps mmaps;
   void *user_esp;
 #endif
 
