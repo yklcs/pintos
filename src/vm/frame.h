@@ -19,4 +19,7 @@ bool frame_free (vm_kpage kpage);
 bool frame_evict (vm_kpage kpage);
 void frame_process_cleanup (struct thread *t);
 
+void frame_table_lock_acquire (void);
+void frame_table_lock_release (void);
+
 #endif /* vm/frame.h */

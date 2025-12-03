@@ -13,7 +13,7 @@
 #include "vm/frame.h"
 
 /* Global frame table structure. */
-static struct
+struct
 {
   struct frame *frames;
   int len;
@@ -62,6 +62,8 @@ choose_victim ()
 struct frame *
 frame_find (void *kaddr)
 {
+  ASSERT (lock_held_by_current_thread (&frame_table.lock));
+
   void *off = kaddr - (uintptr_t)(pool_base (true));
   unsigned idx = pg_no (off);
   ASSERT (idx < frame_table.len);
@@ -234,4 +236,16 @@ frame_evict (vm_kpage kpage)
   lock_release (&frame_table.lock);
 
   return true;
+}
+
+void
+frame_table_lock_acquire (void)
+{
+  lock_acquire (&frame_table.lock);
+}
+
+void
+frame_table_lock_release (void)
+{
+  lock_release (&frame_table.lock);
 }

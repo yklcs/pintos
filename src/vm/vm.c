@@ -3,6 +3,7 @@
 #include "vm/vm.h"
 #include "filesys/file.h"
 #include "threads/malloc.h"
+#include "threads/synch.h"
 #include "threads/thread.h"
 #include "threads/vaddr.h"
 #include "userprog/pagedir.h"
@@ -10,6 +11,15 @@
 #include "vm/page.h"
 #include "vm/frame.h"
 #include "vm/swap.h"
+
+extern struct
+{
+  struct frame *frames;
+  int len;
+  struct lock lock;
+
+  int clock_cursor;
+} frame_table;
 
 /* Initialize the virtual memory system. */
 void
@@ -129,11 +139,13 @@ vm_load (vm_upage upage)
       return false;
     }
 
+  frame_table_lock_acquire ();
   page->frame = frame_find (kpage);
   page->frame->page = page;
   page->frame->owner = t;
   page->frame->pinned = false;
   page->loc = VM_LOC_MEM;
+  frame_table_lock_release ();
 
   return true;
 }
