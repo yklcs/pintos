@@ -42,6 +42,7 @@ choose_victim ()
       if (f->owner == NULL)
         {
           victim = f;
+          f->pinned = true;
           lock_release (&frame_table.lock);
           return victim->kpage;
         }
@@ -50,6 +51,7 @@ choose_victim ()
       if (!accessed)
         {
           victim = frame_table.frames + frame_table.clock_cursor;
+          f->pinned = true;
           lock_release (&frame_table.lock);
           return victim->kpage;
         }
@@ -159,7 +161,7 @@ frame_process_cleanup (struct thread *t)
   for (i = 0; i < frame_table.len; i++)
     {
       frame = &frame_table.frames[i];
-      if (frame->owner == t)
+      if (frame->owner == t && !frame->pinned)
         {
           pagedir_clear_page (t->pagedir, frame->page->upage);
           frame->page = NULL;
@@ -176,15 +178,19 @@ frame_evict (vm_kpage kpage)
   struct frame *frame;
   struct page *page;
 
+  lock_acquire (&frame_table.lock);
+
   frame = frame_find (kpage);
   if (frame == NULL)
     {
       printf ("frame_evict: frame to evict 0x%x not found\n", kpage);
+      lock_release (&frame_table.lock);
       return false;
     }
 
   if (frame->owner == NULL)
     {
+      lock_release (&frame_table.lock);
       return true;
     }
 
@@ -197,6 +203,7 @@ frame_evict (vm_kpage kpage)
       if (!swap_out (page))
         {
           printf ("frame_evict: failed to swap out 0x%x\n", page->upage);
+          lock_release (&frame_table.lock);
           return false;
         }
       break;
@@ -212,6 +219,7 @@ frame_evict (vm_kpage kpage)
             {
               printf ("frame_evict: failed to swap out 0x%x failed\n",
                       page->upage);
+              lock_release (&frame_table.lock);
               return false;
             }
           break;
@@ -222,6 +230,8 @@ frame_evict (vm_kpage kpage)
       page->frame = NULL;
       break;
     }
+
+  lock_release (&frame_table.lock);
 
   return true;
 }
