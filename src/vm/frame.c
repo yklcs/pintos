@@ -123,10 +123,9 @@ frame_free (vm_kpage kpage)
     }
   f->page = NULL;
   f->owner = NULL;
+  f->pinned = false;
 
   lock_release (&frame_table.lock);
-
-  palloc_free_page (kpage);
 
   return true;
 }
@@ -169,7 +168,6 @@ frame_process_cleanup (struct thread *t)
           frame->page = NULL;
           frame->owner = NULL;
           frame->pinned = false;
-          palloc_free_page (frame->kpage);
         }
     }
   lock_release (&frame_table.lock);
