@@ -9,8 +9,7 @@
 #include "vm/frame.h"
 #include "vm/page.h"
 
-#define SLOTS_PER_PAGE (PGSIZE / BLOCK_SECTOR_SIZE)
-
+/* Global swap space. */
 static struct
 {
   struct bitmap *used_map;
@@ -70,7 +69,7 @@ swap_out (struct page *page)
     return false;
   if (page->loc != VM_LOC_MEM)
     return false;
-  if (page->type == VM_PAGE_FILE && page->finfo.writable)
+  if (page->type == VM_PAGE_FILE && page->finfo.mmap)
     return false;
 
   lock_acquire (&swap.lock);

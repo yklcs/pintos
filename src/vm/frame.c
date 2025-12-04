@@ -8,6 +8,7 @@
 #include "threads/thread.h"
 #include "threads/vaddr.h"
 #include "userprog/pagedir.h"
+#include "vm/addr.h"
 #include "vm/page.h"
 #include "vm/swap.h"
 #include "vm/frame.h"
@@ -22,42 +23,7 @@ struct
   int clock_cursor;
 } frame_table;
 
-vm_kpage
-choose_victim ()
-{
-  struct frame *f;
-  struct frame *victim;
-  bool accessed;
-
-  lock_acquire (&frame_table.lock);
-  while (1)
-    {
-      frame_table.clock_cursor
-          = (frame_table.clock_cursor + 1) % frame_table.len;
-      f = frame_table.frames + frame_table.clock_cursor;
-
-      if (f->pinned)
-        continue;
-
-      if (f->owner == NULL)
-        {
-          victim = f;
-          f->pinned = true;
-          lock_release (&frame_table.lock);
-          return victim->kpage;
-        }
-
-      accessed = pagedir_is_accessed (f->owner->pagedir, f->page->upage);
-      if (!accessed)
-        {
-          victim = frame_table.frames + frame_table.clock_cursor;
-          f->pinned = true;
-          lock_release (&frame_table.lock);
-          return victim->kpage;
-        }
-      pagedir_set_accessed (f->owner->pagedir, f->page->upage, false);
-    }
-}
+vm_kpage choose_victim (void);
 
 struct frame *
 frame_find (void *kaddr)
@@ -88,13 +54,13 @@ frame_alloc (struct page *page)
         }
     }
 
-  lock_acquire (&frame_table.lock);
+  frame_table_lock_acquire ();
 
   f = frame_find (kpage);
   if (f == NULL)
     {
       printf ("frame_alloc: frame not found for page 0x%x\n", kpage);
-      lock_release (&frame_table.lock);
+      frame_table_lock_release ();
       return NULL;
     }
 
@@ -102,7 +68,7 @@ frame_alloc (struct page *page)
   f->owner = thread_current ();
   f->pinned = true;
 
-  lock_release (&frame_table.lock);
+  frame_table_lock_release ();
 
   return kpage;
 }
@@ -112,20 +78,20 @@ frame_free (vm_kpage kpage)
 {
   struct frame *f;
 
-  lock_acquire (&frame_table.lock);
+  frame_table_lock_acquire ();
 
   f = frame_find (kpage);
   if (f == NULL)
     {
       printf ("frame_free: could not find frame 0x%x to free \n", kpage);
-      lock_release (&frame_table.lock);
+      frame_table_lock_release ();
       return false;
     }
   f->page = NULL;
   f->owner = NULL;
   f->pinned = false;
 
-  lock_release (&frame_table.lock);
+  frame_table_lock_release ();
 
   return true;
 }
@@ -158,7 +124,7 @@ frame_process_cleanup (struct thread *t)
   int i;
   struct frame *frame;
 
-  lock_acquire (&frame_table.lock);
+  frame_table_lock_acquire ();
   for (i = 0; i < frame_table.len; i++)
     {
       frame = &frame_table.frames[i];
@@ -170,7 +136,7 @@ frame_process_cleanup (struct thread *t)
           frame->pinned = false;
         }
     }
-  lock_release (&frame_table.lock);
+  frame_table_lock_release ();
 }
 
 bool
@@ -181,19 +147,19 @@ frame_evict (vm_kpage kpage)
   struct page *page;
   bool fs_lock_held_ = fs_lock_held ();
 
-  lock_acquire (&frame_table.lock);
+  frame_table_lock_acquire ();
 
   frame = frame_find (kpage);
   if (frame == NULL)
     {
       printf ("frame_evict: frame to evict 0x%x not found\n", kpage);
-      lock_release (&frame_table.lock);
+      frame_table_lock_release ();
       return false;
     }
 
   if (frame->owner == NULL)
     {
-      lock_release (&frame_table.lock);
+      frame_table_lock_release ();
       return true;
     }
 
@@ -206,7 +172,7 @@ frame_evict (vm_kpage kpage)
       if (!swap_out (page))
         {
           printf ("frame_evict: failed to swap out 0x%x\n", page->upage);
-          lock_release (&frame_table.lock);
+          frame_table_lock_release ();
           return false;
         }
       break;
@@ -215,7 +181,7 @@ frame_evict (vm_kpage kpage)
         {
           page->type = VM_PAGE_ANON;
 
-          if (page->finfo.writable)
+          if (page->finfo.mmap)
             {
               page->type = VM_PAGE_FILE;
 
@@ -234,7 +200,7 @@ frame_evict (vm_kpage kpage)
             {
               printf ("frame_evict: failed to swap out 0x%x failed\n",
                       page->upage);
-              lock_release (&frame_table.lock);
+              frame_table_lock_release ();
               return false;
             }
           break;
@@ -249,9 +215,46 @@ frame_evict (vm_kpage kpage)
   frame->owner = NULL;
   frame->page = NULL;
 
-  lock_release (&frame_table.lock);
+  frame_table_lock_release ();
 
   return true;
+}
+
+vm_kpage
+choose_victim ()
+{
+  struct frame *f;
+  struct frame *victim;
+  bool accessed;
+
+  frame_table_lock_acquire ();
+  while (1)
+    {
+      frame_table.clock_cursor
+          = (frame_table.clock_cursor + 1) % frame_table.len;
+      f = frame_table.frames + frame_table.clock_cursor;
+
+      if (f->pinned)
+        continue;
+
+      if (f->owner == NULL)
+        {
+          victim = f;
+          f->pinned = true;
+          frame_table_lock_release ();
+          return victim->kpage;
+        }
+
+      accessed = pagedir_is_accessed (f->owner->pagedir, f->page->upage);
+      if (!accessed)
+        {
+          victim = frame_table.frames + frame_table.clock_cursor;
+          f->pinned = true;
+          frame_table_lock_release ();
+          return victim->kpage;
+        }
+      pagedir_set_accessed (f->owner->pagedir, f->page->upage, false);
+    }
 }
 
 void

@@ -12,15 +12,6 @@
 #include "vm/frame.h"
 #include "vm/swap.h"
 
-extern struct
-{
-  struct frame *frames;
-  int len;
-  struct lock lock;
-
-  int clock_cursor;
-} frame_table;
-
 /* Initialize the virtual memory system. */
 void
 vm_init (void)
@@ -47,7 +38,7 @@ vm_process_exit (void)
 
 bool
 vm_map_file (vm_upage upage, bool writable, struct file *file, off_t ofs,
-             uint32_t read_bytes, uint32_t zero_bytes, bool file_writable)
+             uint32_t read_bytes, uint32_t zero_bytes, bool mmap)
 {
   struct thread *t = thread_current ();
   struct page *page = malloc (sizeof (struct page));
@@ -63,7 +54,7 @@ vm_map_file (vm_upage upage, bool writable, struct file *file, off_t ofs,
   page->finfo.ofs = ofs;
   page->finfo.read_bytes = read_bytes;
   page->finfo.zero_bytes = zero_bytes;
-  page->finfo.writable = file_writable;
+  page->finfo.mmap = mmap;
 
   hash_insert (&t->page_map.pages, &page->elem);
 
