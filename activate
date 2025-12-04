@@ -39,9 +39,9 @@ function stresstest() {
   expected=$2
 
   for i in $(seq $count); do
-      echo "[$i/$count] $command"
+      echo "[$i/$count]"
       
-      rm build/tests/**/*.{output,result} || true
+      rm tests/**/*.{output,result} || true
       make check -j10 > $tmpfile 2>&1
 
       if ! grep -Fq "$expected" "$tmpfile"; then        
