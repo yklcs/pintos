@@ -124,7 +124,6 @@ vm_load (vm_upage upage)
     }
   if (!ok)
     {
-      printf ("vm_load: load failure\n");
       frame_free (kpage);
       return false;
     }
@@ -132,7 +131,6 @@ vm_load (vm_upage upage)
   ok = pagedir_set_page (t->pagedir, page->upage, kpage, page->writable);
   if (!ok)
     {
-      printf ("vm_load: pagedir set failure\n");
       frame_free (kpage);
       return false;
     }

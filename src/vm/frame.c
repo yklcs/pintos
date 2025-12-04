@@ -48,10 +48,7 @@ frame_alloc (struct page *page)
     {
       kpage = choose_victim ();
       if (!frame_evict (kpage))
-        {
-          printf ("frame_alloc: eviction failure for page 0x%x\n", kpage);
-          return NULL;
-        }
+        return NULL;
     }
 
   frame_table_lock_acquire ();
@@ -59,7 +56,6 @@ frame_alloc (struct page *page)
   f = frame_find (kpage);
   if (f == NULL)
     {
-      printf ("frame_alloc: frame not found for page 0x%x\n", kpage);
       frame_table_lock_release ();
       return NULL;
     }
@@ -83,7 +79,6 @@ frame_free (vm_kpage kpage)
   f = frame_find (kpage);
   if (f == NULL)
     {
-      printf ("frame_free: could not find frame 0x%x to free \n", kpage);
       frame_table_lock_release ();
       return false;
     }
@@ -152,7 +147,6 @@ frame_evict (vm_kpage kpage)
   frame = frame_find (kpage);
   if (frame == NULL)
     {
-      printf ("frame_evict: frame to evict 0x%x not found\n", kpage);
       frame_table_lock_release ();
       return false;
     }
@@ -171,7 +165,6 @@ frame_evict (vm_kpage kpage)
     case VM_PAGE_ANON:
       if (!swap_out (page))
         {
-          printf ("frame_evict: failed to swap out 0x%x\n", page->upage);
           frame_table_lock_release ();
           return false;
         }
@@ -198,8 +191,6 @@ frame_evict (vm_kpage kpage)
             }
           else if (!swap_out (page))
             {
-              printf ("frame_evict: failed to swap out 0x%x failed\n",
-                      page->upage);
               frame_table_lock_release ();
               return false;
             }

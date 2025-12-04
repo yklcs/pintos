@@ -22,9 +22,6 @@ void
 swap_init (void)
 {
   swap.device = block_get_role (BLOCK_SWAP);
-  if (swap.device == NULL)
-    printf ("swap_init: could not get swap block device\n");
-
   swap.size = block_size (swap.device) * BLOCK_SECTOR_SIZE / PGSIZE;
   swap.used_map = bitmap_create (swap.size);
   lock_init (&swap.lock);
@@ -40,7 +37,6 @@ swap_in (swap_slot slot, vm_kpage kpage)
 
   if (!bitmap_test (swap.used_map, slot))
     {
-      printf ("swap_in: requested slot is not used\n");
       lock_release (&swap.lock);
       return false;
     }
@@ -77,7 +73,6 @@ swap_out (struct page *page)
   slot = bitmap_scan_and_flip (swap.used_map, 0, 1, false);
   if (slot == BITMAP_ERROR)
     {
-      printf ("swap_out: failed to allocate swap slot\n");
       lock_release (&swap.lock);
       return false;
     }
