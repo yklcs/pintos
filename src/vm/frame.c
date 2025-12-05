@@ -177,6 +177,7 @@ frame_evict (vm_kpage kpage)
           if (page->finfo.mmap)
             {
               page->type = VM_PAGE_FILE;
+              pagedir_clear_page (frame->owner->pagedir, page->upage);
 
               if (!fs_lock_held_)
                 fs_lock_acquire ();
@@ -185,7 +186,6 @@ frame_evict (vm_kpage kpage)
               if (!fs_lock_held_)
                 fs_lock_release ();
 
-              pagedir_clear_page (frame->owner->pagedir, page->upage);
               page->loc = VM_LOC_FILE;
               page->frame = NULL;
             }

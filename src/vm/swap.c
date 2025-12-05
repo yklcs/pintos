@@ -77,6 +77,10 @@ swap_out (struct page *page)
       return false;
     }
 
+  pagedir_clear_page (page->frame->owner->pagedir, page->upage);
+  page->loc = VM_LOC_SWAP;
+  page->swinfo.swap_slot = slot;
+
   for (i = 0; i < SLOTS_PER_PAGE; i++)
     {
       sector = slot * SLOTS_PER_PAGE + i;
@@ -86,9 +90,6 @@ swap_out (struct page *page)
 
   lock_release (&swap.lock);
 
-  page->loc = VM_LOC_SWAP;
-  page->swinfo.swap_slot = slot;
-  pagedir_clear_page (page->frame->owner->pagedir, page->upage);
   page->frame = NULL;
 
   return true;
