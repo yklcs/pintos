@@ -41,9 +41,9 @@ swap_in (swap_slot slot, vm_kpage kpage)
       return false;
     }
 
-  for (i = 0; i < SLOTS_PER_PAGE; i++)
+  for (i = 0; i < BLOCKS_PER_PAGE; i++)
     {
-      sector = slot * SLOTS_PER_PAGE + i;
+      sector = slot * BLOCKS_PER_PAGE + i;
       block_read (swap.device, sector, kpage + i * BLOCK_SECTOR_SIZE);
     }
 
@@ -81,9 +81,9 @@ swap_out (struct page *page)
   page->loc = VM_LOC_SWAP;
   page->swinfo.swap_slot = slot;
 
-  for (i = 0; i < SLOTS_PER_PAGE; i++)
+  for (i = 0; i < BLOCKS_PER_PAGE; i++)
     {
-      sector = slot * SLOTS_PER_PAGE + i;
+      sector = slot * BLOCKS_PER_PAGE + i;
       block_write (swap.device, sector,
                    page->frame->kpage + i * BLOCK_SECTOR_SIZE);
     }

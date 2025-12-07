@@ -6,7 +6,7 @@
 #include "vm/page.h"
 #include <stddef.h>
 
-#define SLOTS_PER_PAGE (PGSIZE / BLOCK_SECTOR_SIZE)
+#define BLOCKS_PER_PAGE (PGSIZE / BLOCK_SECTOR_SIZE)
 
 typedef size_t swap_slot;
 
