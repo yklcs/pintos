@@ -2,6 +2,7 @@
 #include <stdio.h>
 #include "devices/block.h"
 #include "vm/swap.h"
+#include "hash.h"
 #include "threads/thread.h"
 #include "threads/synch.h"
 #include "threads/vaddr.h"
@@ -93,4 +94,22 @@ swap_out (struct page *page)
   page->frame = NULL;
 
   return true;
+}
+
+void
+swap_process_cleanup (struct thread *t)
+{
+  struct hash_iterator it;
+
+  lock_acquire (&swap.lock);
+
+  hash_first (&it, &t->page_map.pages);
+  while (hash_next (&it))
+    {
+      struct page *page = hash_entry (hash_cur (&it), struct page, elem);
+      if (page->loc == VM_LOC_SWAP)
+        bitmap_reset (swap.used_map, page->swinfo.swap_slot);
+    }
+
+  lock_release (&swap.lock);
 }

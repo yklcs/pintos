@@ -32,6 +32,7 @@ vm_process_exit (void)
 {
   struct thread *t = thread_current ();
   mmap_process_cleanup (t);
+  swap_process_cleanup (t);
   frame_process_cleanup (t);
   page_map_destroy (&t->page_map);
 }
